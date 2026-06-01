@@ -37,20 +37,199 @@ const API_URL = "https://script.google.com/macros/s/AKfycbwQIsd32k4LRcOPGO9Yzbes
 const ADMIN_PASSWORD = "16031948";
 const SOGLIA = 60; // % sufficienza
 
+// Verifica incorporata per il collaudo (poi la renderemo caricabile da file)
+const QUIZ_MARKETING = {
+  "quizId": "marketing-2026",
+  "titolo": "Marketing e Strategie Aziendali",
+  "domande": [
+    { "tipo": "singola", "punti": 5, "testo": "Che cos'è il marketing in senso moderno?",
+      "opzioni": [
+        "L'insieme delle attività con cui l'impresa individua i bisogni del mercato e li soddisfa creando valore per il cliente e per sé stessa.",
+        "Il reparto aziendale che si occupa esclusivamente di realizzare la pubblicità e gli spot televisivi.",
+        "La tecnica per vendere il maggior numero possibile di prodotti già fabbricati, anche se il cliente non li desidera.",
+        "Il calcolo dei costi di produzione necessario a stabilire il prezzo di vendita di un bene."
+      ], "corretta": 0,
+      "spiegazione": "Il marketing non coincide con la pubblicità né con la semplice vendita: parte dai bisogni del mercato per offrire un valore che soddisfi il cliente, ottenendo in cambio un profitto." },
+
+    { "tipo": "singola", "punti": 5, "testo": "Qual è la differenza corretta tra «bisogno» e «desiderio» in marketing?",
+      "opzioni": [
+        "Il bisogno è uno stato di mancanza generale (es. nutrirsi); il desiderio è la forma specifica che il bisogno assume (es. un cornetto artigianale).",
+        "Il bisogno riguarda solo i beni di lusso, mentre il desiderio riguarda i beni di prima necessità.",
+        "Bisogno e desiderio sono sinonimi e indicano sempre la stessa identica esigenza del consumatore.",
+        "Il desiderio nasce prima del bisogno ed è ciò che spinge l'impresa a creare nuovi prodotti."
+      ], "corretta": 0,
+      "spiegazione": "Il bisogno è una carenza di fondo comune a tutti; il desiderio è il modo personale e culturale in cui quel bisogno si concretizza." },
+
+    { "tipo": "singola", "punti": 5, "testo": "Quali sono le quattro leve del «marketing mix» (le 4 P)?",
+      "opzioni": [
+        "Product (Prodotto), Price (Prezzo), Place (Distribuzione), Promotion (Promozione/Comunicazione).",
+        "Pubblicità, Prezzo, Produzione, Personale.",
+        "Prodotto, Profitto, Pubblicità, Pianificazione.",
+        "Posizionamento, Pubblico, Promozione, Performance."
+      ], "corretta": 0,
+      "spiegazione": "Il marketing mix combina quattro leve operative: Product, Price, Place e Promotion." },
+
+    { "tipo": "singola", "punti": 5, "testo": "Che cosa si intende per «segmentazione del mercato»?",
+      "opzioni": [
+        "Suddividere il mercato in gruppi omogenei di consumatori con bisogni e caratteristiche simili.",
+        "Ridurre progressivamente i prezzi per eliminare i concorrenti più deboli dal mercato.",
+        "Dividere il territorio nazionale in zone geografiche per organizzare le consegne.",
+        "Frazionare il prodotto in confezioni più piccole per aumentarne le vendite."
+      ], "corretta": 0,
+      "spiegazione": "Segmentare significa scomporre un mercato eterogeneo in gruppi omogenei per bisogni, comportamenti o caratteristiche." },
+
+    { "tipo": "singola", "punti": 5, "testo": "Nel processo di marketing, che cosa rappresenta il «target» (mercato obiettivo)?",
+      "opzioni": [
+        "Il segmento o l'insieme di segmenti che l'impresa sceglie di servire concentrandovi le proprie risorse.",
+        "Il fatturato massimo che l'azienda si prefigge di raggiungere entro la fine dell'anno.",
+        "Il prezzo ideale a cui l'impresa punta a vendere il proprio prodotto di punta.",
+        "L'insieme di tutti i potenziali clienti presenti sul mercato, senza alcuna distinzione."
+      ], "corretta": 0,
+      "spiegazione": "Dopo aver segmentato, l'impresa sceglie quali segmenti servire: questo è il target." },
+
+    { "tipo": "singola", "punti": 5, "testo": "Che cos'è il «posizionamento» di un prodotto o di una marca?",
+      "opzioni": [
+        "L'immagine distintiva che il prodotto occupa nella mente del consumatore rispetto ai concorrenti.",
+        "Il punto del negozio (scaffale o vetrina) in cui il prodotto viene fisicamente collocato.",
+        "La posizione dell'azienda nella classifica di fatturato del proprio settore.",
+        "Il luogo geografico in cui conviene aprire un nuovo punto vendita."
+      ], "corretta": 0,
+      "spiegazione": "Il posizionamento è percettivo: riguarda come il prodotto è collocato nella mente del cliente rispetto alla concorrenza." },
+
+    { "tipo": "singola", "punti": 5, "testo": "Nell'analisi SWOT, come sono classificati i quattro fattori?",
+      "opzioni": [
+        "Punti di forza e di debolezza sono interni all'impresa; opportunità e minacce sono esterni (ambiente/mercato).",
+        "Punti di forza e opportunità sono interni; debolezze e minacce sono esterni.",
+        "Tutti e quattro i fattori sono esterni e dipendono unicamente dai concorrenti.",
+        "Tutti e quattro i fattori sono interni e dipendono solo dalle scelte dell'imprenditore."
+      ], "corretta": 0,
+      "spiegazione": "La SWOT distingue i fattori interni controllabili (forza/debolezza) dai fattori esterni non controllabili (opportunità/minacce)." },
+
+    { "tipo": "singola", "punti": 5, "testo": "Quali sono, nell'ordine, le fasi del ciclo di vita di un prodotto?",
+      "opzioni": [
+        "Introduzione, crescita, maturità, declino.",
+        "Progettazione, produzione, vendita, smaltimento.",
+        "Lancio, sconto, promozione, ritiro.",
+        "Crescita, maturità, introduzione, declino."
+      ], "corretta": 0,
+      "spiegazione": "Dopo l'introduzione si ha la crescita, poi la maturità (vendite massime e stabili) e infine il declino." },
+
+    { "tipo": "singola", "punti": 5, "testo": "In che cosa consiste la strategia di prezzo detta di «scrematura» (skimming)?",
+      "opzioni": [
+        "Lanciare il prodotto a un prezzo elevato rivolto ai clienti disposti a pagare di più, abbassandolo poi nel tempo.",
+        "Fissare fin dall'inizio un prezzo molto basso per conquistare rapidamente una grande quota di mercato.",
+        "Mantenere lo stesso prezzo dei concorrenti per non scatenare una guerra dei prezzi.",
+        "Vendere il prodotto sottocosto per liberare il magazzino dalle rimanenze."
+      ], "corretta": 0,
+      "spiegazione": "La scrematura parte da un prezzo alto per i clienti meno sensibili al prezzo, poi lo riduce. È l'opposto della penetrazione." },
+
+    { "tipo": "singola", "punti": 5, "testo": "A quale logica risponde il cosiddetto «prezzo psicologico» (es. 9,99 € invece di 10,00 €)?",
+      "opzioni": [
+        "Far percepire al cliente il prezzo come sensibilmente più basso, sfruttando la lettura della prima cifra.",
+        "Coprire esattamente i costi di produzione lasciando un margine di profitto fisso del 99%.",
+        "Rispettare un obbligo di legge che vieta di esporre prezzi con cifre tonde.",
+        "Indicare che il prodotto è in promozione temporanea e tornerà presto al prezzo pieno."
+      ], "corretta": 0,
+      "spiegazione": "9,99 € viene percepito come «nove e qualcosa», quindi più conveniente di 10 €, pur con differenza minima." },
+
+    { "tipo": "singola", "punti": 5, "testo": "Che cosa comprende il «mix di comunicazione» (promotion) di un'impresa?",
+      "opzioni": [
+        "Pubblicità, promozioni delle vendite, relazioni pubbliche, vendita personale e marketing diretto/digitale.",
+        "Soltanto gli spot televisivi e i cartelloni pubblicitari.",
+        "L'insieme dei prezzi praticati nei diversi canali di vendita.",
+        "La rete dei fornitori e dei trasportatori che riforniscono il punto vendita."
+      ], "corretta": 0,
+      "spiegazione": "La comunicazione comprende pubblicità, promozioni, relazioni pubbliche, vendita personale e strumenti diretti/digitali." },
+
+    { "tipo": "singola", "punti": 5, "testo": "Qual è la differenza tra canale di distribuzione «diretto» e «indiretto»?",
+      "opzioni": [
+        "Nel canale diretto il produttore vende direttamente al consumatore; in quello indiretto intervengono uno o più intermediari.",
+        "Nel canale diretto si vende solo online; in quello indiretto solo nei negozi fisici.",
+        "Nel canale diretto i prezzi sono fissi; in quello indiretto sono sempre trattabili.",
+        "Nel canale diretto si vende all'ingrosso; in quello indiretto solo al dettaglio."
+      ], "corretta": 0,
+      "spiegazione": "La differenza è la presenza di intermediari: nel diretto non ce ne sono, nell'indiretto si inseriscono grossisti e/o dettaglianti." },
+
+    { "tipo": "singola", "punti": 5, "testo": "Qual è la funzione principale della «marca» (brand) per il consumatore?",
+      "opzioni": [
+        "Identificare il prodotto, distinguerlo dai concorrenti e garantirne origine e qualità nel tempo.",
+        "Aumentare obbligatoriamente il peso e le dimensioni della confezione.",
+        "Ridurre per legge il prezzo del prodotto rispetto ai prodotti senza marca.",
+        "Indicare la data di scadenza e gli ingredienti previsti dall'etichetta."
+      ], "corretta": 0,
+      "spiegazione": "La marca identifica e garantisce: permette di riconoscere il prodotto, distinguerlo e fidarsi di una qualità costante." },
+
+    { "tipo": "singola", "punti": 5, "testo": "Qual è oggi uno dei principali vantaggi del marketing digitale e dei social media per una piccola impresa?",
+      "opzioni": [
+        "Raggiungere un pubblico mirato con costi contenuti e misurare in modo preciso i risultati delle iniziative.",
+        "Eliminare del tutto la necessità di avere un prodotto di buona qualità.",
+        "Garantire automaticamente la vendita di tutta la produzione, senza alcuno sforzo.",
+        "Sostituire completamente e in ogni caso il rapporto diretto con il cliente."
+      ], "corretta": 0,
+      "spiegazione": "I canali digitali permettono di rivolgersi a un pubblico selezionato con costi ridotti e di misurare i risultati con dati precisi." },
+
+    { "tipo": "singola", "punti": 5, "testo": "Perché la «fidelizzazione» del cliente è considerata strategicamente conveniente?",
+      "opzioni": [
+        "Mantenere un cliente acquisito costa in genere meno che conquistarne uno nuovo, e un cliente fedele acquista di più e consiglia l'impresa.",
+        "Un cliente fedele è obbligato per contratto ad acquistare solo da quell'impresa.",
+        "La fidelizzazione consente di aumentare liberamente i prezzi senza alcuna conseguenza.",
+        "I clienti fedeli rinunciano automaticamente a qualsiasi forma di garanzia sul prodotto."
+      ], "corretta": 0,
+      "spiegazione": "Trattenere un cliente costa meno che acquisirne uno nuovo; inoltre il cliente fedele riacquista e genera passaparola." },
+
+    { "tipo": "singola", "punti": 5, "testo": "Qual è la differenza tra «mission» e «vision» di un'impresa?",
+      "opzioni": [
+        "La mission esprime la ragion d'essere e ciò che l'impresa fa oggi; la vision indica l'obiettivo di lungo periodo, ciò che l'impresa aspira a diventare.",
+        "La mission riguarda i dipendenti, mentre la vision riguarda esclusivamente gli azionisti.",
+        "La mission è il bilancio annuale, mentre la vision è il piano finanziario triennale.",
+        "Mission e vision sono la stessa cosa e vengono usate come sinonimi nei documenti aziendali."
+      ], "corretta": 0,
+      "spiegazione": "La mission dice chi siamo e cosa facciamo oggi; la vision proietta l'impresa verso ciò che vuole diventare." },
+
+    { "tipo": "singola", "punti": 5, "testo": "Secondo Porter, su quali due grandi strategie può fondarsi il vantaggio competitivo di un'impresa?",
+      "opzioni": [
+        "Leadership di costo (offrire a costi/prezzi più bassi) e differenziazione (offrire qualcosa di unico e distintivo).",
+        "Aumento dei prezzi e riduzione della qualità.",
+        "Pubblicità aggressiva e licenziamento del personale.",
+        "Espansione geografica e riduzione della gamma di prodotti."
+      ], "corretta": 0,
+      "spiegazione": "Il vantaggio competitivo deriva dall'essere più efficienti (leadership di costo) o dall'offrire qualcosa di unico (differenziazione)." },
+
+    { "tipo": "singola", "punti": 5, "testo": "A che cosa serve l'analisi della concorrenza (benchmarking)?",
+      "opzioni": [
+        "Conoscere punti di forza e di debolezza dei concorrenti per individuare spazi di mercato e migliorare la propria offerta.",
+        "Copiare integralmente i prodotti dei concorrenti per rivenderli a un prezzo inferiore.",
+        "Stabilire accordi segreti con i concorrenti per fissare insieme i prezzi di vendita.",
+        "Eliminare ogni forma di pubblicità per non attirare l'attenzione dei rivali."
+      ], "corretta": 0,
+      "spiegazione": "Studiare i concorrenti aiuta a scoprire bisogni non soddisfatti e a posizionarsi meglio. Gli accordi sui prezzi sono invece vietati." },
+
+    { "tipo": "singola", "punti": 5, "testo": "Qual è la differenza tra ricerche di mercato «quantitative» e «qualitative»?",
+      "opzioni": [
+        "Le quantitative misurano dati numerici su grandi campioni (es. questionari); le qualitative indagano in profondità motivazioni e opinioni su pochi soggetti (es. interviste).",
+        "Le quantitative si fanno solo online, le qualitative solo di persona.",
+        "Le quantitative riguardano i prezzi, le qualitative riguardano i colori del prodotto.",
+        "Le quantitative sono gratuite, mentre le qualitative hanno sempre un costo elevatissimo."
+      ], "corretta": 0,
+      "spiegazione": "Le quantitative rispondono al «quanto» su campioni ampi; le qualitative approfondiscono il «perché» su pochi soggetti." },
+
+    { "tipo": "aperta", "punti": 5, "testo": "La tua pasticceria vuole lanciare una nuova linea di prodotti senza glutine. Spiega come applicheresti almeno tre leve del marketing mix (le 4 P) a questo lancio, motivando ogni scelta.",
+      "griglia": "0–5: si valuti l'identificazione di almeno tre leve tra Product, Price, Place e Promotion; la coerenza con il prodotto «senza glutine» e con il target; la chiarezza del linguaggio tecnico." }
+  ]
+};
+
 /* ====================================================================
    CHIAMATA AL MOTORE
-   POST come "testo semplice": evita il blocco CORS (preflight).
+   Invio via GET con i dati nel parametro ?p=... : il canale GET è quello
+   affidabile (le richieste POST verso Apps Script in alcuni ambienti non
+   raggiungono il motore). Il "&t=" evita la cache del browser.
 ==================================================================== */
 async function api(payload, tentativi = 3) {
   let ultimoErrore;
+  const url = API_URL + '?p=' + encodeURIComponent(JSON.stringify(payload)) + '&t=' + Date.now();
   for (let i = 0; i < tentativi; i++) {
     try {
-      const res = await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(payload),
-        redirect: 'follow'
-      });
+      const res = await fetch(url, { method: 'GET', redirect: 'follow' });
       const data = await res.json();
       return data;
     } catch (e) {
@@ -92,7 +271,7 @@ const Spinner = ({ size = 18 }) => <Icon name="spinner" size={size} />;
 const Firma = () => (
   <div className="mt-8 mb-5 text-center opacity-80 select-none">
     <div className="text-[#34495e] font-bold tracking-widest text-sm">ARTE BIANCA DI NEIVE</div>
-    <div className="text-[#34495e] text-xs font-medium">verifiche online · prof. Mauro Becattini</div>
+    <div className="text-[#34495e] text-xs font-medium">verifiche online · prof. Mauro Becattini · v2</div>
   </div>
 );
 
@@ -308,8 +487,6 @@ const Docente = ({ onExit }) => {
         <div className="flex flex-wrap gap-2 mb-4">
           <button onClick={() => fileClasse.current && fileClasse.current.click()} className="bg-[#34495e] text-white font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-[#2c3e50]">{busy === 'classe' ? <Spinner/> : <Icon name="upload" size={16}/>} Carica classe</button>
           <input ref={fileClasse} type="file" accept="application/json,.json" onChange={onFileClasse} className="hidden"/>
-          <button onClick={() => fileQuiz.current && fileQuiz.current.click()} className="bg-[#7fb088] text-white font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:brightness-95">{busy === 'quiz' ? <Spinner/> : <Icon name="doc" size={16}/>} Carica verifica</button>
-          <input ref={fileQuiz} type="file" accept="application/json,.json" onChange={onFileQuiz} className="hidden"/>
           <button onClick={caricaRisultati} className="bg-white border-2 border-[#34495e] text-[#34495e] font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-gray-50">{busy === 'risultati' ? <Spinner/> : <Icon name="refresh" size={16}/>} Aggiorna risultati</button>
           <button onClick={esportaCSV} disabled={!risultati.length} className="bg-white border-2 border-[#34495e] text-[#34495e] font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-gray-50 disabled:opacity-40 ml-auto"><Icon name="download" size={16}/> Esporta CSV</button>
         </div>
@@ -317,6 +494,7 @@ const Docente = ({ onExit }) => {
         {msg && <div className={`mb-4 text-sm font-semibold rounded-xl px-4 py-2.5 ${msg.e ? 'bg-[#c0392b]/10 text-[#c0392b]' : 'bg-[#7fb088]/15 text-[#4c7a55]'}`}>{msg.t}</div>}
 
         {quizCorrenti[cls] && <div className="mb-4 text-sm font-semibold rounded-xl px-4 py-2.5 bg-[#aed6f1]/30 text-[#34495e] flex items-center gap-2"><Icon name="doc" size={16}/> Verifica attiva per la {cls}: «{quizCorrenti[cls]}»</div>}
+        <div className="mb-4 text-sm font-semibold rounded-xl px-4 py-2.5 bg-[#aed6f1]/30 text-[#34495e] flex items-center gap-2"><Icon name="doc" size={16}/> Verifica del collaudo: «Marketing e Strategie Aziendali» (incorporata)</div>
 
         {/* PIN della classe (da mostrare alla LIM) */}
         {studentiClasse.length > 0 && (
@@ -555,10 +733,8 @@ const App = () => {
       if (r.error === 'RETE') return { error: 'Connessione assente. Controlla la rete e riprova.' };
       return { error: 'Accesso non riuscito. Riprova.' };
     }
-    if (!r.quizDisponibile) return { error: 'Per ora non c\'è nessuna verifica attiva per la tua classe.' };
-    const q = await api({ action: 'getQuiz', classe: r.studente.classe });
-    if (!q.ok) return { error: 'Verifica non disponibile. Avvisa il docente.' };
-    setStudente(r.studente); setQuiz(q.quiz); setView('studente');
+    // Per il collaudo la verifica è incorporata nell'app
+    setStudente(r.studente); setQuiz(QUIZ_MARKETING); setView('studente');
     return { ok: true };
   };
 
