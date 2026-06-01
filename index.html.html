@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Verifiche · Arte Bianca di Neive</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap');
+body{font-family:'Montserrat',sans-serif;background:#fcfcfc;color:#2e2e2e;-webkit-tap-highlight-color:transparent;}
+::-webkit-scrollbar{width:8px;height:8px;}
+::-webkit-scrollbar-track{background:#f1f1f1;}
+::-webkit-scrollbar-thumb{background:#d2b4de;border-radius:4px;}
+.fade-in{animation:fadeIn .35s ease-out forwards;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+.spin{animation:spin 1s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+</style>
+<script>
+tailwind.config={theme:{extend:{colors:{ab:{blue:'#34495e',red:'#c0392b',lightblue:'#aed6f1',green:'#7fb088',yellow:'#f7dd73',brown:'#756f63',dark:'#2e2e2e',lavender:'#d2b4de'}},boxShadow:{card:'0 4px 6px -1px rgba(0,0,0,.05),0 2px 4px -1px rgba(0,0,0,.03)'}}}}
+</script>
+</head>
+<body class="min-h-screen flex flex-col">
+<div id="root" class="flex-grow flex flex-col"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+/* ====================================================================
+   CONFIGURAZIONE
+==================================================================== */
+// Indirizzo del motore dati (Apps Script). NON pubblicarlo in giro.
+const API_URL = "https://script.google.com/macros/s/AKfycbwQIsd32k4LRcOPGO9YzbesiA6xBd0vTmVxc_b-IKIdwMxH8j5bqJosAqREfgWxBm0l/exec";
+const ADMIN_PASSWORD = "16031948";
+const SOGLIA = 60; // % sufficienza
+
+/* ====================================================================
+   CHIAMATA AL MOTORE
+   POST come "testo semplice": evita il blocco CORS (preflight).
+==================================================================== */
+async function api(payload, tentativi = 3) {
+  let ultimoErrore;
+  for (let i = 0; i < tentativi; i++) {
+    try {
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload),
+        redirect: 'follow'
+      });
+      const data = await res.json();
+      return data;
+    } catch (e) {
+      ultimoErrore = e;
+      await new Promise(r => setTimeout(r, 800 * (i + 1))); // attende e riprova
+    }
+  }
+  return { ok: false, error: 'RETE', dettaglio: String(ultimoErrore) };
+}
+
+/* ====================================================================
+   ICONE
+==================================================================== */
+const Icon = ({ name, size = 20, className = "" }) => {
+  const p = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", xmlns: "http://www.w3.org/2000/svg" };
+  const icons = {
+    key: <svg {...p}><path d="M21 2l-2 2m-7.6 7.6a5.5 5.5 0 1 1-7.8 7.8 5.5 5.5 0 0 1 7.8-7.8zM15.5 7.5l3 3L22 7l-3-3"/></svg>,
+    shield: <svg {...p}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
+    next: <svg {...p}><polyline points="9 18 15 12 9 6"/></svg>,
+    prev: <svg {...p}><polyline points="15 18 9 12 15 6"/></svg>,
+    check: <svg {...p}><polyline points="20 6 9 17 4 12"/></svg>,
+    x: <svg {...p}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+    send: <svg {...p}><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>,
+    users: <svg {...p}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
+    upload: <svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
+    download: <svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
+    refresh: <svg {...p}><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.5 9a9 9 0 0 1 14.8-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15"/></svg>,
+    logout: <svg {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
+    chevron: <svg {...p}><polyline points="6 9 12 15 18 9"/></svg>,
+    clock: <svg {...p}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
+    doc: <svg {...p}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>,
+    spinner: <svg {...p} className="spin"><path d="M21 12a9 9 0 1 1-6.2-8.5"/></svg>
+  };
+  return <span className={className}>{icons[name]}</span>;
+};
+
+const Spinner = ({ size = 18 }) => <Icon name="spinner" size={size} />;
+
+const Firma = () => (
+  <div className="mt-8 mb-5 text-center opacity-80 select-none">
+    <div className="text-[#34495e] font-bold tracking-widest text-sm">ARTE BIANCA DI NEIVE</div>
+    <div className="text-[#34495e] text-xs font-medium">verifiche online · prof. Mauro Becattini</div>
+  </div>
+);
+
+const Modal = ({ children, onClose, maxW = "max-w-md" }) => (
+  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm fade-in" onClick={onClose}>
+    <div className={`w-full ${maxW} bg-white rounded-3xl shadow-card p-7`} onClick={e => e.stopPropagation()}>{children}</div>
+  </div>
+);
+
+/* ====================================================================
+   PUNTEGGIO domande chiuse
+==================================================================== */
+function scoreDomanda(d, risp) {
+  if (d.tipo === 'singola') return risp === d.corretta ? d.punti : 0;
+  if (d.tipo === 'vero_falso') return risp === d.corretta ? d.punti : 0;
+  if (d.tipo === 'multipla') {
+    const a = Array.isArray(risp) ? [...risp].sort() : [];
+    const b = Array.isArray(d.corrette) ? [...d.corrette].sort() : [];
+    return (a.length === b.length && a.every((v, i) => v === b[i])) ? d.punti : 0;
+  }
+  return 0; // aperta → corretta dal docente
+}
+const isChiusa = d => d.tipo === 'singola' || d.tipo === 'multipla' || d.tipo === 'vero_falso';
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+
+/* ====================================================================
+   SCHERMATA INIZIALE
+==================================================================== */
+const Home = ({ onStudente, onDocente }) => {
+  const [pin, setPin] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [pwOpen, setPwOpen] = useState(false);
+  const [pw, setPw] = useState("");
+  const [pwErr, setPwErr] = useState(false);
+
+  const entra = async () => {
+    const clean = pin.trim();
+    if (clean.toLowerCase() === 'admin') { setPwOpen(true); return; }
+    if (!clean) { setErr("Inserisci il tuo PIN."); return; }
+    setErr(""); setBusy(true);
+    const res = await onStudente(clean);
+    setBusy(false);
+    if (res && res.error) setErr(res.error);
+  };
+  const entraDocente = () => {
+    if (pw === ADMIN_PASSWORD) { onDocente(); }
+    else { setPwErr(true); setPw(""); }
+  };
+
+  return (
+    <div className="flex-grow flex flex-col items-center justify-center p-5 fade-in">
+      <div className="w-full max-w-sm bg-white rounded-[2rem] shadow-card p-8 text-center">
+        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[#34495e] text-white mb-4"><Icon name="key" size={30}/></div>
+        <h1 className="text-2xl font-extrabold text-[#34495e] leading-tight">Verifiche online<br/>Arte Bianca di Neive</h1>
+        <p className="text-sm text-[#756f63] mt-2 mb-6">Inserisci il PIN fornito dal docente.</p>
+        <input inputMode="numeric" value={pin} autoFocus
+          onChange={e => { setPin(e.target.value.replace(/[^0-9a-zA-Z]/g, '')); setErr(""); }}
+          onKeyDown={e => e.key === 'Enter' && entra()}
+          placeholder="• • • • •"
+          className="w-full text-center text-3xl font-extrabold tracking-[0.4em] py-4 rounded-2xl border-2 border-gray-200 focus:border-[#34495e] outline-none text-[#34495e]"/>
+        {err && <div className="text-[#c0392b] text-sm font-semibold mt-3">{err}</div>}
+        <button disabled={busy} onClick={entra} className="w-full mt-5 py-4 rounded-2xl font-bold bg-[#34495e] text-white shadow-lg hover:bg-[#2c3e50] disabled:opacity-60 flex items-center justify-center gap-2">
+          {busy ? <><Spinner/> Verifico…</> : <>Entra <Icon name="next" size={18}/></>}
+        </button>
+        <button onClick={() => setPwOpen(true)} className="mt-5 text-xs font-semibold text-gray-400 hover:text-[#34495e] inline-flex items-center gap-1"><Icon name="shield" size={14}/> Accedi come docente</button>
+      </div>
+      <Firma/>
+      {pwOpen && (
+        <Modal onClose={() => { setPwOpen(false); setPw(""); setPwErr(false); }}>
+          <div className="text-center">
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-[#34495e]/10 text-[#34495e] mb-3"><Icon name="shield" size={26}/></div>
+            <h3 className="text-xl font-extrabold text-[#34495e]">Area Docente</h3>
+            <p className="text-sm text-[#756f63] mt-1 mb-5">Inserisci la password.</p>
+            <input type="password" value={pw} autoFocus
+              onChange={e => { setPw(e.target.value); setPwErr(false); }}
+              onKeyDown={e => e.key === 'Enter' && entraDocente()}
+              placeholder="Password"
+              className="w-full text-center text-lg font-semibold py-3 rounded-xl border-2 border-gray-200 focus:border-[#34495e] outline-none"/>
+            {pwErr && <div className="text-[#c0392b] text-sm font-semibold mt-3">Password errata.</div>}
+            <div className="grid grid-cols-2 gap-3 mt-5">
+              <button onClick={() => { setPwOpen(false); setPw(""); setPwErr(false); }} className="py-3 rounded-xl font-bold border-2 border-gray-200 text-[#34495e]">Annulla</button>
+              <button onClick={entraDocente} className="py-3 rounded-xl font-bold bg-[#34495e] text-white">Accedi</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+/* ====================================================================
+   DOCENTE
+==================================================================== */
+const Docente = ({ onExit }) => {
+  const [classi, setClassi] = useState([]);
+  const [cls, setCls] = useState("");
+  const [studentiCache, setStudentiCache] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ab_studenti_cache') || '{}'); } catch (e) { return {}; }
+  });
+  const [risultati, setRisultati] = useState([]);
+  const [quizCorrenti, setQuizCorrenti] = useState({});
+  const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState("");
+  const fileClasse = useRef(null);
+  const fileQuiz = useRef(null);
+
+  const salvaCache = (c) => { setStudentiCache(c); localStorage.setItem('ab_studenti_cache', JSON.stringify(c)); };
+
+  const caricaClassi = useCallback(async () => {
+    const r = await api({ action: 'listClasses', password: ADMIN_PASSWORD });
+    if (r.ok) {
+      setClassi(r.classi);
+      if (!cls && r.classi.length) setCls(r.classi[0].classe);
+    }
+  }, [cls]);
+
+  useEffect(() => { caricaClassi(); }, []);
+  useEffect(() => { if (cls) caricaRisultati(); }, [cls]);
+
+  const caricaRisultati = async () => {
+    if (!cls) return;
+    setBusy('risultati');
+    const r = await api({ action: 'getResults', password: ADMIN_PASSWORD, classe: cls });
+    setBusy('');
+    if (r.ok) setRisultati(r.righe); else setMsg({ t: 'Errore nel caricamento risultati.', e: true });
+  };
+
+  // Carica un file classe JSON
+  const onFileClasse = (e) => {
+    const f = e.target.files[0]; e.target.value = "";
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      let dati;
+      try { dati = JSON.parse(reader.result); } catch (err) { setMsg({ t: 'Il file non è un JSON valido.', e: true }); return; }
+      if (!dati.classe || !Array.isArray(dati.studenti)) { setMsg({ t: 'Formato file classe non valido.', e: true }); return; }
+      setBusy('classe');
+      const r = await api({ action: 'saveClass', password: ADMIN_PASSWORD, classe: dati.classe, studenti: dati.studenti });
+      setBusy('');
+      if (r.ok) {
+        const c = { ...studentiCache, [r.classe]: r.studenti };
+        salvaCache(c);
+        await caricaClassi();
+        setCls(r.classe);
+        setMsg({ t: `Classe ${r.classe} caricata: ${r.studenti.length} studenti con PIN.`, e: false });
+      } else setMsg({ t: 'Errore nel salvataggio della classe.', e: true });
+    };
+    reader.readAsText(f);
+  };
+
+  // Carica un file verifica JSON
+  const onFileQuiz = (e) => {
+    const f = e.target.files[0]; e.target.value = "";
+    if (!f) return;
+    if (!cls) { setMsg({ t: 'Seleziona prima una classe.', e: true }); return; }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      let q;
+      try { q = JSON.parse(reader.result); } catch (err) { setMsg({ t: 'Il file verifica non è un JSON valido.', e: true }); return; }
+      if (!q.quizId || !Array.isArray(q.domande)) { setMsg({ t: 'Formato verifica non valido.', e: true }); return; }
+      setBusy('quiz');
+      const r = await api({ action: 'saveQuiz', password: ADMIN_PASSWORD, classe: cls, quizId: q.quizId, titolo: q.titolo || q.quizId, quiz: q });
+      setBusy('');
+      if (r.ok) { setQuizCorrenti({ ...quizCorrenti, [cls]: q.titolo || q.quizId }); setMsg({ t: `Verifica «${q.titolo || q.quizId}» attivata per la ${cls}.`, e: false }); }
+      else setMsg({ t: 'Errore nel caricamento della verifica.', e: true });
+    };
+    reader.readAsText(f);
+  };
+
+  const esportaCSV = () => {
+    const intest = ['Orario', 'PIN', 'Cognome', 'Nome', 'Classe', 'Verifica', 'Stato', 'PuntiChiuse'];
+    const righe = risultati.map(r => {
+      const pc = r.risposte && r.risposte.punteggioChiuse != null ? r.risposte.punteggioChiuse : r.punteggio;
+      return [new Date(r.timestamp).toLocaleString('it-IT'), r.pin, r.cognome, r.nome, r.classe, r.quizId, r.stato, pc];
+    });
+    const csv = [intest, ...righe].map(r => r.map(c => `"${String(c == null ? '' : c).replace(/"/g, '""')}"`).join(';')).join('\n');
+    const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob); const a = document.createElement('a');
+    a.href = url; a.download = `risultati_${cls}_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  };
+
+  const studentiClasse = studentiCache[cls] || [];
+
+  return (
+    <div className="flex-grow flex flex-col min-h-screen">
+      <div className="bg-[#34495e] text-white">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center"><Icon name="users" size={22}/></div>
+            <div className="leading-tight"><div className="font-extrabold text-lg">Cruscotto Docente</div><div className="text-xs text-white/60">Arte Bianca · prof. Becattini</div></div>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <select value={cls} onChange={e => setCls(e.target.value)} className="appearance-none bg-white/10 text-white font-bold rounded-xl pl-4 pr-9 py-2.5 outline-none cursor-pointer hover:bg-white/20">
+                {classi.length === 0 && <option value="" className="text-[#34495e]">Nessuna classe</option>}
+                {classi.map(c => <option key={c.classe} value={c.classe} className="text-[#34495e]">Classe {c.classe} ({c.studenti})</option>)}
+              </select>
+              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"><Icon name="chevron" size={16}/></span>
+            </div>
+            <button onClick={onExit} className="bg-white/10 hover:bg-white/20 rounded-xl px-3 py-2.5 font-bold flex items-center gap-1.5 text-sm"><Icon name="logout" size={16}/> Esci</button>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-6xl mx-auto w-full px-4 py-5 flex-grow">
+        <div className="flex flex-wrap gap-2 mb-4">
+          <button onClick={() => fileClasse.current && fileClasse.current.click()} className="bg-[#34495e] text-white font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-[#2c3e50]">{busy === 'classe' ? <Spinner/> : <Icon name="upload" size={16}/>} Carica classe</button>
+          <input ref={fileClasse} type="file" accept="application/json,.json" onChange={onFileClasse} className="hidden"/>
+          <button onClick={() => fileQuiz.current && fileQuiz.current.click()} className="bg-[#7fb088] text-white font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:brightness-95">{busy === 'quiz' ? <Spinner/> : <Icon name="doc" size={16}/>} Carica verifica</button>
+          <input ref={fileQuiz} type="file" accept="application/json,.json" onChange={onFileQuiz} className="hidden"/>
+          <button onClick={caricaRisultati} className="bg-white border-2 border-[#34495e] text-[#34495e] font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-gray-50">{busy === 'risultati' ? <Spinner/> : <Icon name="refresh" size={16}/>} Aggiorna risultati</button>
+          <button onClick={esportaCSV} disabled={!risultati.length} className="bg-white border-2 border-[#34495e] text-[#34495e] font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-gray-50 disabled:opacity-40 ml-auto"><Icon name="download" size={16}/> Esporta CSV</button>
+        </div>
+
+        {msg && <div className={`mb-4 text-sm font-semibold rounded-xl px-4 py-2.5 ${msg.e ? 'bg-[#c0392b]/10 text-[#c0392b]' : 'bg-[#7fb088]/15 text-[#4c7a55]'}`}>{msg.t}</div>}
+
+        {quizCorrenti[cls] && <div className="mb-4 text-sm font-semibold rounded-xl px-4 py-2.5 bg-[#aed6f1]/30 text-[#34495e] flex items-center gap-2"><Icon name="doc" size={16}/> Verifica attiva per la {cls}: «{quizCorrenti[cls]}»</div>}
+
+        {/* PIN della classe (da mostrare alla LIM) */}
+        {studentiClasse.length > 0 && (
+          <div className="bg-white rounded-2xl shadow-card overflow-hidden mb-5">
+            <div className="px-4 py-3 bg-gray-50 font-bold text-[#34495e] flex items-center justify-between">
+              <span>PIN classe {cls} — da comunicare agli studenti</span>
+              <span className="text-xs font-semibold text-[#756f63]">{studentiClasse.length} studenti</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px bg-gray-100">
+              {[...studentiClasse].sort((a,b)=>(a.cognome+a.nome).localeCompare(b.cognome+b.nome)).map(s => (
+                <div key={s.pin} className="bg-white px-4 py-2.5 flex items-center justify-between">
+                  <span className="font-semibold text-[#2e2e2e] text-sm">{s.cognome} {s.nome}</span>
+                  <span className="font-mono font-extrabold text-[#34495e] text-lg tracking-wider">{s.pin}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Risultati */}
+        <div className="bg-white rounded-2xl shadow-card overflow-hidden">
+          <div className="px-4 py-3 bg-gray-50 font-bold text-[#34495e]">Consegne ricevute — classe {cls || '—'}</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead><tr className="bg-gray-50 text-[#756f63] text-left">
+                <th className="px-4 py-3 font-bold">Orario</th><th className="px-4 py-3 font-bold">Studente</th>
+                <th className="px-4 py-3 font-bold">PIN</th><th className="px-4 py-3 font-bold">Stato</th>
+                <th className="px-4 py-3 font-bold text-center">Punti chiuse</th>
+              </tr></thead>
+              <tbody>
+                {risultati.length === 0 && <tr><td colSpan="5" className="px-4 py-8 text-center text-gray-400">Nessuna consegna ancora. Premi «Aggiorna risultati» durante e dopo la verifica.</td></tr>}
+                {risultati.map((r, i) => {
+                  const pc = r.risposte && r.risposte.punteggioChiuse != null ? r.risposte.punteggioChiuse : r.punteggio;
+                  return (
+                    <tr key={i} className="border-t border-gray-100">
+                      <td className="px-4 py-3 text-[#756f63] whitespace-nowrap">{new Date(r.timestamp).toLocaleTimeString('it-IT')}</td>
+                      <td className="px-4 py-3 font-semibold whitespace-nowrap">{r.cognome} {r.nome}</td>
+                      <td className="px-4 py-3 font-mono font-bold text-[#34495e]">{r.pin}</td>
+                      <td className="px-4 py-3"><span className="text-xs font-bold px-2.5 py-1 rounded-full bg-[#7fb088]/15 text-[#4c7a55]">{r.stato}</span></td>
+                      <td className="px-4 py-3 text-center font-extrabold text-[#34495e]">{pc != null ? pc : '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <Firma/>
+      </div>
+    </div>
+  );
+};
+
+/* ====================================================================
+   STUDENTE — svolgimento verifica
+==================================================================== */
+const Studente = ({ studente, quiz, onFine }) => {
+  const domande = quiz.domande;
+  const [idx, setIdx] = useState(0);
+  // ordine opzioni mescolato per ogni domanda chiusa
+  const [ordini] = useState(() => {
+    const o = {};
+    domande.forEach((d, i) => { if (d.tipo === 'singola' || d.tipo === 'multipla') o[i] = shuffle(d.opzioni.map((_, k) => k)); });
+    return o;
+  });
+  const [risposte, setRisposte] = useState({});
+  const [conferma, setConferma] = useState(false);
+  const [stato, setStato] = useState('gioco'); // gioco | invio | fatto | errore
+
+  const setRisp = (val) => setRisposte(r => ({ ...r, [idx]: val }));
+  const risposta = (qid) => risposte[qid];
+  const rispDate = domande.filter((d, i) => {
+    const v = risposte[i];
+    if (d.tipo === 'multipla') return Array.isArray(v) && v.length > 0;
+    if (d.tipo === 'aperta') return typeof v === 'string' && v.trim().length > 0;
+    return v != null;
+  }).length;
+
+  const consegna = async () => {
+    setConferma(false); setStato('invio');
+    let punti = 0;
+    const rispOut = {};
+    domande.forEach((d, i) => { rispOut['d' + i] = risposte[i] != null ? risposte[i] : null; if (isChiusa(d)) punti += scoreDomanda(d, risposte[i]); });
+    const r = await api({
+      action: 'submit', pin: studente.pin, quizId: quiz.quizId, stato: 'consegnato',
+      punteggio: punti, risposte: { answers: rispOut, punteggioChiuse: punti, maxChiuse: domande.filter(isChiusa).reduce((a, d) => a + d.punti, 0) }
+    });
+    if (r.ok) setStato('fatto'); else setStato('errore');
+  };
+
+  if (stato === 'fatto') {
+    return (
+      <div className="flex-grow flex flex-col items-center justify-center p-6 text-center fade-in">
+        <div className="w-20 h-20 rounded-full bg-[#7fb088]/20 text-[#7fb088] flex items-center justify-center"><Icon name="check" size={44}/></div>
+        <h1 className="text-2xl font-extrabold text-[#34495e] mt-6">Verifica consegnata!</h1>
+        <p className="mt-3 text-[#756f63] max-w-xs font-medium">Le tue risposte sono state salvate correttamente. Puoi chiudere la pagina.</p>
+        <div className="mt-6 bg-gray-100 rounded-2xl px-5 py-3 font-bold text-[#34495e]">{studente.cognome} {studente.nome}</div>
+        <Firma/>
+      </div>
+    );
+  }
+  if (stato === 'errore') {
+    return (
+      <div className="flex-grow flex flex-col items-center justify-center p-6 text-center fade-in">
+        <div className="w-20 h-20 rounded-full bg-[#c0392b]/15 text-[#c0392b] flex items-center justify-center"><Icon name="x" size={44}/></div>
+        <h1 className="text-2xl font-extrabold text-[#c0392b] mt-6">Salvataggio non riuscito</h1>
+        <p className="mt-3 text-[#756f63] max-w-xs font-medium">Probabile problema di rete. Le tue risposte sono ancora qui: riprova a consegnare.</p>
+        <button onClick={consegna} className="mt-6 px-8 py-3 rounded-xl font-bold bg-[#34495e] text-white flex items-center gap-2"><Icon name="send" size={18}/> Riprova a consegnare</button>
+      </div>
+    );
+  }
+
+  const d = domande[idx];
+  const ordine = ordini[idx] || (d.opzioni ? d.opzioni.map((_, k) => k) : []);
+
+  return (
+    <div className="flex-grow flex flex-col min-h-screen">
+      {/* Header con NOME grande */}
+      <div className="sticky top-0 z-30 bg-[#34495e] text-white shadow-md">
+        <div className="max-w-2xl mx-auto px-4 py-2 flex items-center justify-between">
+          <div className="leading-none">
+            <div className="text-[10px] uppercase tracking-widest text-white/60">Classe {studente.classe}</div>
+            <div className="text-lg md:text-xl font-extrabold tracking-tight">{studente.cognome} {studente.nome}</div>
+          </div>
+          <div className="text-right"><div className="text-[10px] uppercase tracking-widest text-white/60">Risposte</div><div className="text-lg font-extrabold">{rispDate}/{domande.length}</div></div>
+        </div>
+      </div>
+
+      <div className="flex-grow w-full max-w-2xl mx-auto px-4 py-4 flex flex-col">
+        <div className="flex flex-wrap gap-1.5 justify-center mb-4">
+          {domande.map((q, i) => {
+            const v = risposte[i];
+            const done = q.tipo === 'multipla' ? (Array.isArray(v) && v.length > 0) : q.tipo === 'aperta' ? (typeof v === 'string' && v.trim()) : v != null;
+            return <button key={i} onClick={() => setIdx(i)} className={`w-3.5 h-3.5 rounded-full ${i === idx ? 'ring-2 ring-offset-1 ring-[#34495e] scale-110' : ''} ${done ? 'bg-[#34495e]' : 'bg-gray-300'}`}/>;
+          })}
+        </div>
+
+        <div className="bg-white rounded-2xl shadow-card p-6 flex-grow fade-in" key={idx}>
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda {idx + 1} di {domande.length}</span>
+            <span className="text-xs font-bold text-[#34495e] bg-gray-100 px-2 py-1 rounded">{d.punti} pt</span>
+          </div>
+          <p className="font-bold text-[#2e2e2e] text-lg mb-5 leading-relaxed">{d.testo}</p>
+
+          {d.tipo === 'singola' && (
+            <div className="space-y-3">
+              {ordine.map(oi => {
+                const sel = risposta(idx) === oi;
+                return <div key={oi} onClick={() => setRisp(oi)} className={`p-4 rounded-xl shadow-sm cursor-pointer flex items-center ${sel ? 'bg-[#aed6f1] border-2 border-[#34495e]' : 'bg-white border border-gray-200 hover:border-[#34495e]'}`}>
+                  <div className={`w-5 h-5 rounded-full border-2 mr-4 flex items-center justify-center flex-shrink-0 ${sel ? 'border-[#34495e]' : 'border-gray-300'}`}>{sel && <div className="w-2.5 h-2.5 rounded-full bg-[#34495e]"/>}</div>
+                  <span className="font-medium text-sm md:text-base leading-snug">{d.opzioni[oi]}</span></div>;
+              })}
+            </div>
+          )}
+
+          {d.tipo === 'multipla' && (
+            <div className="space-y-3">
+              <div className="text-xs text-[#756f63] font-bold uppercase tracking-wider">Puoi selezionare più risposte</div>
+              {ordine.map(oi => {
+                const cur = Array.isArray(risposta(idx)) ? risposta(idx) : [];
+                const sel = cur.includes(oi);
+                const toggle = () => setRisp(sel ? cur.filter(x => x !== oi) : [...cur, oi]);
+                return <div key={oi} onClick={toggle} className={`p-4 rounded-xl shadow-sm cursor-pointer flex items-center ${sel ? 'bg-[#aed6f1] border-2 border-[#34495e]' : 'bg-white border border-gray-200 hover:border-[#34495e]'}`}>
+                  <div className={`w-5 h-5 rounded border-2 mr-4 flex items-center justify-center flex-shrink-0 ${sel ? 'border-[#34495e] bg-[#34495e]' : 'border-gray-300'}`}>{sel && <Icon name="check" size={14} className="text-white"/>}</div>
+                  <span className="font-medium text-sm md:text-base leading-snug">{d.opzioni[oi]}</span></div>;
+              })}
+            </div>
+          )}
+
+          {d.tipo === 'vero_falso' && (
+            <div className="grid grid-cols-2 gap-3">
+              {[true, false].map(v => {
+                const sel = risposta(idx) === v;
+                return <div key={String(v)} onClick={() => setRisp(v)} className={`p-5 rounded-xl shadow-sm cursor-pointer text-center font-bold ${sel ? 'bg-[#aed6f1] border-2 border-[#34495e]' : 'bg-white border border-gray-200 hover:border-[#34495e]'}`}>{v ? 'VERO' : 'FALSO'}</div>;
+              })}
+            </div>
+          )}
+
+          {d.tipo === 'aperta' && (
+            <div>
+              <textarea value={risposta(idx) || ''} onChange={e => setRisp(e.target.value)} onPaste={e => e.preventDefault()} onDrop={e => e.preventDefault()} rows={7}
+                placeholder="Scrivi qui la tua risposta…" className="w-full p-4 rounded-xl border-2 border-gray-200 focus:border-[#34495e] outline-none resize-none text-sm md:text-base leading-relaxed"/>
+              <div className="text-xs text-[#756f63] mt-2">Per questa domanda incolla e trascinamento sono disattivati.</div>
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 mt-4">
+          <button disabled={idx === 0} onClick={() => setIdx(i => Math.max(0, i - 1))} className="py-3.5 rounded-xl font-bold border-2 border-[#34495e] text-[#34495e] disabled:opacity-30 disabled:border-gray-200 disabled:text-gray-300 flex items-center justify-center gap-1"><Icon name="prev" size={18}/> Indietro</button>
+          {idx < domande.length - 1
+            ? <button onClick={() => setIdx(i => Math.min(domande.length - 1, i + 1))} className="py-3.5 rounded-xl font-bold bg-[#34495e] text-white hover:bg-[#2c3e50] flex items-center justify-center gap-1">Avanti <Icon name="next" size={18}/></button>
+            : <button onClick={() => setConferma(true)} className="py-3.5 rounded-xl font-bold bg-[#7fb088] text-white hover:brightness-95 flex items-center justify-center gap-2"><Icon name="send" size={18}/> Consegna</button>}
+        </div>
+        <Firma/>
+      </div>
+
+      {conferma && (
+        <Modal onClose={() => setConferma(false)}>
+          <div className="text-center">
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-[#7fb088]/15 text-[#7fb088] mb-3"><Icon name="send" size={26}/></div>
+            <h3 className="text-xl font-extrabold text-[#34495e]">Consegnare la verifica?</h3>
+            <p className="text-sm text-[#756f63] mt-2 mb-5">Hai risposto a <b>{rispDate}</b> domande su <b>{domande.length}</b>. Dopo la consegna non potrai più modificare.</p>
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={() => setConferma(false)} className="py-3 rounded-xl font-bold border-2 border-[#34495e] text-[#34495e]">Torna al test</button>
+              <button onClick={consegna} className="py-3 rounded-xl font-bold bg-[#7fb088] text-white">Consegna</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {stato === 'invio' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl p-8 text-center shadow-card">
+            <div className="text-[#34495e] flex justify-center mb-3"><Spinner size={40}/></div>
+            <div className="font-bold text-[#34495e]">Sto salvando la tua verifica…</div>
+            <div className="text-sm text-[#756f63] mt-1">Non chiudere la pagina.</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ====================================================================
+   ROOT
+==================================================================== */
+const App = () => {
+  const [view, setView] = useState('home');
+  const [studente, setStudente] = useState(null);
+  const [quiz, setQuiz] = useState(null);
+
+  const onStudente = async (pin) => {
+    const r = await api({ action: 'checkPin', pin });
+    if (!r.ok) {
+      if (r.error === 'PIN_NON_VALIDO') return { error: 'PIN non riconosciuto.' };
+      if (r.error === 'RETE') return { error: 'Connessione assente. Controlla la rete e riprova.' };
+      return { error: 'Accesso non riuscito. Riprova.' };
+    }
+    if (!r.quizDisponibile) return { error: 'Per ora non c\'è nessuna verifica attiva per la tua classe.' };
+    const q = await api({ action: 'getQuiz', classe: r.studente.classe });
+    if (!q.ok) return { error: 'Verifica non disponibile. Avvisa il docente.' };
+    setStudente(r.studente); setQuiz(q.quiz); setView('studente');
+    return { ok: true };
+  };
+
+  if (view === 'studente' && studente && quiz) return <Studente studente={studente} quiz={quiz} onFine={() => setView('home')} />;
+  if (view === 'docente') return <Docente onExit={() => setView('home')} />;
+  return <Home onStudente={onStudente} onDocente={() => setView('docente')} />;
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
