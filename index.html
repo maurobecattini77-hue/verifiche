@@ -586,7 +586,7 @@
             };
 
             const sblocca = (pin) => {
-                const st = { ...classData.students[pin], status: 'playing' };
+                const st = { ...classData.students[pin], status: 'idle' };
                 onSyncUpdate(cls, pin, st);
             };
 
@@ -1079,7 +1079,12 @@
                 const { cls, student } = found;
 
                 if (student.status === 'idle') {
-                    const updated = { ...student, status: 'playing', startedAt: Date.now(), optionOrder: buildOptionOrder(db.questions) };
+                    const updated = { 
+                        ...student, 
+                        status: 'playing', 
+                        startedAt: student.startedAt || Date.now(), 
+                        optionOrder: (student.optionOrder && Object.keys(student.optionOrder).length > 0) ? student.optionOrder : buildOptionOrder(db.questions) 
+                    };
                     sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
                     setSession({ pin, cls }); setView('student');
                     syncUpdateCloud(cls, pin, updated);
