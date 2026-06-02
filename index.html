@@ -1049,12 +1049,9 @@
 
             useEffect(() => {
                 pullCloudState();
-                
-                // Utilizziamo il polling (richieste periodiche) invece dei WebSocket
-                // perché i WebSocket (Realtime) sono bloccati per sicurezza in questo ambiente.
                 const intervalId = setInterval(() => {
                     pullCloudState();
-                }, 3000); // Aggiorna i dati ogni 3 secondi
+                }, 3000); 
 
                 return () => { clearInterval(intervalId); };
             }, []);
@@ -1093,17 +1090,21 @@
                 if (!found) { callback({ ok: false, msg: "PIN non censito a sistema." }); return; }
                 const { cls, student } = found;
 
-                if (student.status === 'idle') {
-                    const updated = { ...student, status: 'playing', startedAt: Date.now(), optionOrder: buildOptionOrder(db.questions) };
-                    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
-                    setSession({ pin, cls }); setView('student');
-                    syncUpdateCloud(cls, pin, updated);
-                    callback({ ok: true });
-                } else {
-                    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
-                    setSession({ pin, cls }); setView('student');
-                    callback({ ok: true });
+                // --- LOGICA ANTIFURBETTI ---
+                // Se non è 'idle', significa che è un secondo accesso non autorizzato
+                if (student.status !== 'idle') {
+                    const lockedStudent = { ...student, status: 'locked' };
+                    syncUpdateCloud(cls, pin, lockedStudent);
+                    callback({ ok: false, msg: "ATTENZIONE: Accesso multiplo rilevato! Verifica bloccata. Contatta il docente." });
+                    return;
                 }
+
+                // Primo accesso: procedi normalmente
+                const updated = { ...student, status: 'playing', startedAt: Date.now(), optionOrder: buildOptionOrder(db.questions) };
+                sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
+                setSession({ pin, cls }); setView('student');
+                syncUpdateCloud(cls, pin, updated);
+                callback({ ok: true });
             };
 
             const closedQuestions = db.questions ? db.questions.filter(q => q.type === 'single') : [];
