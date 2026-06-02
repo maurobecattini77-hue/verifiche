@@ -160,7 +160,7 @@
             questions.filter(q => q.type !== 'open').forEach(q => {
                 s += calculatePointsForQuestion(q, student.answers[q.id]);
             });
-            return s;
+            return Math.round(s * 10) / 10;
         };
 
         const computeOpenScore = (student, questions) => {
@@ -169,7 +169,7 @@
                 const ans = student.answers[q.id];
                 if (ans && ans.score != null) total += parseFloat(ans.score);
             });
-            return total;
+            return Math.round(total * 10) / 10;
         };
 
         const isGraded = (student, questions) => {
@@ -1140,7 +1140,7 @@
                                                     const answeredCount = questions.filter(q => {
                                                         const a = s.answers[q.id];
                                                         if (!a) return false;
-                                                        if (q.type === 'open') return !!ans.selection && String(ans.selection).trim().length > 0;
+                                                        if (q.type === 'open') return !!a.selection && String(a.selection).trim().length > 0;
                                                         return a.selection !== undefined;
                                                     }).length;
 
@@ -1727,9 +1727,9 @@
                 }
             };
 
-            const maxClosed = db.questions ? db.questions.filter(q => q.type !== 'open').reduce((a, q) => a + q.points, 0) : 0;
-            const maxOpen = db.questions ? db.questions.filter(q => q.type === 'open').reduce((a, q) => a + q.points, 0) : 0;
-            const maxTotal = maxClosed + maxOpen;
+            const maxClosed = db.questions ? Math.round(db.questions.filter(q => q.type !== 'open').reduce((a, q) => a + q.points, 0) * 10) / 10 : 0;
+            const maxOpen = db.questions ? Math.round(db.questions.filter(q => q.type === 'open').reduce((a, q) => a + q.points, 0) * 10) / 10 : 0;
+            const maxTotal = Math.round((maxClosed + maxOpen) * 10) / 10;
 
             if (loading) {
                 return (
