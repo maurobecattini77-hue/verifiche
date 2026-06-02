@@ -88,6 +88,9 @@
     <script type="text/babel">
         const { useState, useEffect, useRef, useCallback } = React;
 
+        /* =====================================================================
+           CONFIGURAZIONE URL E CHIAVI SUPABASE
+        ===================================================================== */
         const SUPABASE_URL = "https://zwuutlrafdmfqexbnohc.supabase.co"; 
         const SUPABASE_ANON_KEY = "sb_publishable_6oCmDuDh_8ibf-p4ZAcfZg_muXXuO8N"; 
 
@@ -97,6 +100,9 @@
         const SESSION_KEY = "ab_exam_session_v1"; 
         const SOGLIA_SUFFICIENZA = 60;            
 
+        /* =====================================================================
+           UTILS PER IL GOVERNO DELLE RISPOSTE E DEI PUNTEGGI
+        ===================================================================== */
         const shuffle = (arr) => {
             const a = [...arr];
             for (let i = a.length - 1; i > 0; i--) {
@@ -122,12 +128,6 @@
             });
             return s;
         };
-        
-        const totalScore = (student, questions) => {
-            const closed = student.closedScore != null ? student.closedScore : computeClosedScore(student, questions);
-            const open = student.openScore != null ? student.openScore : 0;
-            return closed + open;
-        };
 
         const findStudent = (classes, pin) => {
             for (const cls of Object.keys(classes)) {
@@ -138,6 +138,9 @@
             return null;
         };
 
+        /* =====================================================================
+           ICONE
+        ===================================================================== */
         const Icon = ({ name, size = 20, className = "" }) => {
             const p = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", xmlns: "http://www.w3.org/2000/svg" };
             const icons = {
@@ -185,6 +188,17 @@
             return <span className={`text-xs font-bold px-2.5 py-1 rounded-full whitespace-nowrap ${s.c}`}>{s.t}</span>;
         };
 
+        const Modal = ({ children, onClose, maxW = "max-w-md" }) => (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm fade-in no-print" onClick={onClose}>
+                <div className={`w-full ${maxW} bg-white rounded-3xl shadow-lg p-7 bounce-in`} onClick={e => e.stopPropagation()}>
+                    {children}
+                </div>
+            </div>
+        );
+
+        /* =====================================================================
+           COMPONENTI GRAFICI PER LE DOMANDE
+        ===================================================================== */
         const SingleChoice = ({ q, answer, onAnswer, locked, reveal, order }) => {
             const display = (order && order.length === q.options.length) ? order : q.options.map((_, i) => i);
             return (
@@ -230,14 +244,6 @@
             </div>
         );
 
-        const Modal = ({ children, onClose, maxW = "max-w-md" }) => (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm fade-in no-print" onClick={onClose}>
-                <div className={`w-full ${maxW} bg-white rounded-3xl shadow-lg p-7 bounce-in`} onClick={e => e.stopPropagation()}>
-                    {children}
-                </div>
-            </div>
-        );
-
         const Landing = ({ onStudent, onAdmin }) => {
             const [pin, setPin] = useState("");
             const [err, setErr] = useState("");
@@ -273,18 +279,13 @@
                         <button onClick={submitPin} className="w-full mt-5 py-4 rounded-2xl font-bold bg-[#34495e] text-white shadow-lg hover:bg-[#2c3e50] transition-colors scale-hover flex items-center justify-center gap-2">
                             Entra <Icon name="next" size={18} />
                         </button>
-                        
-                        {/* PULSANTE ACCESSO DOCENTE RIPRISTINATO */}
-                        <button onClick={() => setAdminPwOpen(true)} className="mt-5 text-xs font-semibold text-gray-400 hover:text-[#34495e] inline-flex items-center gap-1">
-                            <Icon name="shield" size={14} /> Accesso docente
-                        </button>
+                        <button onClick={() => setAdminPwOpen(true)} className="mt-5 text-xs font-semibold text-gray-400 hover:text-[#34495e] inline-flex items-center gap-1"><Icon name="shield" size={14} /> Accesso docente</button>
                     </div>
                     <Signature />
 
                     {adminPwOpen && (
                         <Modal onClose={() => { setAdminPwOpen(false); setPw(""); setPwErr(false); }}>
                             <div className="text-center">
-                                <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-[#34495e]/10 text-[#34495e] mb-3"><Icon name="shield" size={26}/></div>
                                 <h3 className="text-xl font-extrabold text-[#34495e]">Area Docente</h3>
                                 <p className="text-sm text-[#756f63] mt-1 mb-5">Inserisci la password di accesso.</p>
                                 <input type="password" value={pw} autoFocus onChange={e => { setPw(e.target.value); setPwErr(false); }} onKeyDown={e => e.key === 'Enter' && submitPw()} placeholder="Password"
@@ -301,6 +302,9 @@
             );
         };
 
+        /* =====================================================================
+           VISUALIZZAZIONE E REVISIONE DELLA PROVA COMPLETA
+        ===================================================================== */
         const ReviewExam = ({ student, cls, reveal, questions, maxClosed, maxOpen, maxTotal }) => {
             const closed = student.closedScore != null ? student.closedScore : computeClosedScore(student, questions);
             const open = student.openScore != null ? student.openScore : 0;
@@ -423,8 +427,8 @@
                 return (
                     <div className="flex-grow flex flex-col items-center justify-center p-6 bg-[#c0392b] text-white text-center fade-in min-h-screen">
                         <div className="pulse-red"><Icon name="lock" size={70} /></div>
-                        <h1 className="text-3xl font-extrabold mt-6">Sei disconnesso</h1>
-                        <p className="mt-3 text-white/90 max-w-xs font-medium">Accesso bloccato. La prova è stata sospesa. Contatta il docente per essere riammesso.</p>
+                        <h1 className="text-3xl font-extrabold mt-6">Accesso bloccato</h1>
+                        <p className="mt-3 text-white/90 max-w-xs font-medium">Hai già effettuato l'accesso in precedenza. Per continuare, devi chiedere lo sblocco al docente.</p>
                         <div className="mt-6 bg-white/15 rounded-2xl px-5 py-3 font-bold tracking-wide">{student.lastName} {student.firstName}</div>
                     </div>
                 );
@@ -514,6 +518,9 @@
             );
         };
 
+        /* =====================================================================
+           CRUSCOTTO DEL DOCENTE (ADMIN PANEL) E ARCHIVIO
+        ===================================================================== */
         const AdminApp = ({ db, onSyncUpdate, onResetDB, onExit, maxClosed, maxOpen, maxTotal }) => {
             const classesList = Object.keys(db.classes || {});
             const [cls, setCls] = useState(classesList[0] || "");
@@ -580,11 +587,6 @@
 
             const sblocca = (pin) => {
                 const st = { ...classData.students[pin], status: 'playing' };
-                onSyncUpdate(cls, pin, st);
-            };
-
-            const blocca = (pin) => {
-                const st = { ...classData.students[pin], status: 'locked' };
                 onSyncUpdate(cls, pin, st);
             };
 
@@ -693,7 +695,7 @@
                             <div className="fade-in">
                                 <div className="flex flex-wrap gap-2 mb-4">
                                     <button onClick={() => setPubOpen(true)} className="bg-[#7fb088] text-white font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:brightness-95 scale-hover"><Icon name="eye" size={16}/> Pubblica voti</button>
-                                    <button onClick={exportPDF} className="bg-[#34495e] text-white font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-[#2c3e50] scale-hover"><Icon name="print" size={16}/> Esporta PDF (Intera Classe)</button>
+                                    <button onClick={exportPDF} className="bg-[#34495e] text-white font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-[#2c3e50] scale-hover"><Icon name="print" size={16}/> Esporta PDF</button>
                                     <button onClick={exportArchive} className="bg-[#34495e] text-white font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-[#2c3e50] scale-hover"><Icon name="archive" size={16}/> Esporta Archivio HTML</button>
                                     <button onClick={() => setResetOpen(true)} className="bg-white border-2 border-[#c0392b] text-[#c0392b] font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-[#c0392b]/5 scale-hover ml-auto"><Icon name="trash" size={16}/> Reset Cloud Completo</button>
                                 </div>
@@ -727,9 +729,11 @@
                                                 {students.map(s => {
                                                     const submitted = s.status === 'submitted' || s.status === 'published';
                                                     const playing = s.status === 'playing';
+                                                    const locked = s.status === 'locked';
                                                     const answeredCount = questions.filter(q => s.answers[q.id]).length + (s.openAnswer ? 1 : 0);
                                                     const closed = s.closedScore != null ? s.closedScore : (submitted ? computeClosedScore(s, questions) : null);
                                                     const tot = submitted ? (closed + (s.openScore||0)) : null;
+                                                    const canView = submitted || playing;
                                                     return (
                                                         <tr key={s.pin} className="border-t border-gray-100 hover:bg-gray-50/60">
                                                             <td className="px-4 py-3 font-mono font-bold text-[#34495e]">{s.pin}</td>
@@ -745,9 +749,8 @@
                                                             <td className="px-4 py-3 text-center">{tot != null ? <span className="inline-flex items-center gap-1 font-extrabold text-[#34495e]">{tot}/{maxTotal}{s.graded && <Icon name="lock" size={12} className="text-[#7fb088]" />}</span> : <span className="text-gray-400">—</span>}</td>
                                                             <td className="px-4 py-3">
                                                                 <div className="flex justify-end gap-1.5 flex-wrap">
-                                                                    {s.status === 'locked' && <button onClick={() => sblocca(s.pin)} className="bg-[#aed6f1]/30 text-[#34495e] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-[#aed6f1]/60"><Icon name="unlock" size={14}/> Riammetti</button>}
-                                                                    {playing && <button onClick={() => blocca(s.pin)} className="bg-[#c0392b]/10 text-[#c0392b] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-[#c0392b]/20"><Icon name="lock" size={14}/> Sospendi</button>}
-                                                                    {(submitted || playing) && <button onClick={() => setViewPin(s.pin)} className="bg-gray-100 text-[#34495e] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-gray-200"><Icon name="eye" size={14}/> Sfoglia</button>}
+                                                                    {locked && <button onClick={() => sblocca(s.pin)} className="bg-[#aed6f1]/30 text-[#34495e] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-[#aed6f1]/60"><Icon name="unlock" size={14}/> Sblocca</button>}
+                                                                    {canView && <button onClick={() => setViewPin(s.pin)} className="bg-gray-100 text-[#34495e] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-gray-200"><Icon name="eye" size={14}/> Sfoglia</button>}
                                                                     {submitted && <button onClick={() => requestGrade(s)} className={`rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 ${s.graded ? 'bg-[#7fb088]/15 text-[#4c7a55] hover:bg-[#7fb088]/30' : 'bg-[#f7dd73]/30 text-[#7a6310] hover:bg-[#f7dd73]/60'}`}><Icon name={s.graded ? 'lock' : 'edit'} size={14}/> {s.graded ? 'Rivaluta' : 'Valuta'}</button>}
                                                                 </div>
                                                             </td>
@@ -880,7 +883,7 @@
                         const percent = Math.round(tot / maxTotal * 100);
                         return (
                             <div key={s.pin} className="print-student" style={{ padding: '4mm 0' }}>
-                                <div style={{ borderBottom: '3px solid #34495e', paddingBottom: 8, Richmond: 14 }}>
+                                <div style={{ borderBottom: '3px solid #34495e', paddingBottom: 8, marginBottom: 14 }}>
                                     <div style={{ fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: '#756f63' }}>Report Esito Verifiche Live Cloud</div>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 4 }}>
                                         <div style={{ fontSize: 22, fontWeight: 800, color: '#34495e' }}>{s.lastName} {s.firstName}</div>
@@ -924,92 +927,102 @@
         const buildArchiveHTML = (cls, classData, questions, maxClosed, maxOpen, maxTotal) => {
             const payload = { cls, classData, questions, maxClosed, maxOpen, maxTotal, SOGLIA: SOGLIA_SUFFICIENZA, generatedAt: new Date().toISOString() };
             const dataJson = JSON.stringify(payload).replace(/</g, '\\u003c');
-            return `<!DOCTYPE html>
-<html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Archivio Storico Verifica \${cls}</title>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin><\/script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin><\/script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>
-<script src="https://cdn.tailwindcss.com"><\/script>
-<style>@import url('https://fonts.googleapis.com/css2?family=Cabin:wght@400;500;600;700&display=swap');body{font-family:Cabin,sans-serif;background:#fcfcfc;color:#2e2e2e;}</style>
-</head><body><div id="root"></div><script>window.__ARCHIVE__ = \${dataJson};<\/script>
-<script type="text/babel">
-    const { useState } = React;
-    const D = window.__ARCHIVE__;
-    const Q = D.questions;
-    const CLOSED = Q.filter(q => q.type==='single');
-    const OPEN = Q.find(q => q.type==='open');
+            
+            const archScript = `
+                const { useState } = React;
+                const D = window.__ARCHIVE__;
+                const Q = D.questions;
+                const CLOSED = Q.filter(q => q.type==='single');
+                const OPEN = Q.find(q => q.type==='open');
 
-    function ArchiveApp() {
-        const [sel, setSel] = useState(null);
-        const students = Object.values(D.classData.students).sort((a,b)=>(a.lastName+a.firstName).localeCompare(b.lastName+b.firstName));
-        const student = sel ? D.classData.students[sel] : null;
+                function ArchiveApp() {
+                    const [sel, setSel] = useState(null);
+                    const students = Object.values(D.classData.students).sort((a,b)=>(a.lastName+a.firstName).localeCompare(b.lastName+b.firstName));
+                    const student = sel ? D.classData.students[sel] : null;
 
-        if (student) {
-            const pct = Math.round(( (student.closedScore||0) + (student.openScore||0) ) / D.maxTotal * 100);
-            return (
-                <div className="max-w-2xl mx-auto px-4 py-6">
-                    <button onClick={()=>setSel(null)} className="mb-4 text-sm font-bold text-[#34495e]">&larr; Sfoglia Elenco</button>
-                    <div className="bg-white rounded-3xl shadow-md p-6 mb-4 border border-gray-100">
-                        <h2 className="text-xl font-bold text-[#34495e]">{student.lastName} {student.firstName}</h2>
-                        <div className="text-sm text-gray-500 font-semibold">Esito: \${pct}% — Totale: \${(student.closedScore||0)+(student.openScore||0)}/\${D.maxTotal}</div>
-                    </div>
-                    {CLOSED.map((q, i) => {
-                        const a = student.answers[q.id];
-                        const ok = a && a.selection === q.correctIndex;
+                    if (student) {
+                        const pct = Math.round(( (student.closedScore||0) + (student.openScore||0) ) / D.maxTotal * 100);
                         return (
-                            <div key={q.id} className={"bg-white p-5 rounded-xl border-l-8 mb-3 shadow-sm " + (ok ? "border-[#7fb088]" : "border-[#c0392b]")}>
-                                <p className="font-bold text-sm mb-2">\${i+1}. \${q.question}</p>
-                                <div className="space-y-1.5">
-                                    {q.options.map((opt, idx) => (
-                                        <div key={idx} className={"p-2.5 rounded-lg text-xs font-medium border " + (idx===q.correctIndex ? "bg-[#7fb088] text-white" : (a&&a.selection===idx ? "bg-[#c0392b] text-white" : "bg-gray-50 text-gray-400"))}>\${opt}</div>
-                                    ))}
+                            <div className="max-w-2xl mx-auto px-4 py-6">
+                                <button onClick={()=>setSel(null)} className="mb-4 text-sm font-bold text-[#34495e]">&larr; Sfoglia Elenco</button>
+                                <div className="bg-white rounded-3xl shadow-md p-6 mb-4 border border-gray-100">
+                                    <h2 className="text-xl font-bold text-[#34495e]">{student.lastName} {student.firstName}</h2>
+                                    <div className="text-sm text-gray-500 font-semibold">Esito: {pct}% — Totale: {(student.closedScore||0)+(student.openScore||0)}/{D.maxTotal}</div>
                                 </div>
+                                {CLOSED.map((q, i) => {
+                                    const a = student.answers[q.id];
+                                    const ok = a && a.selection === q.correctIndex;
+                                    return (
+                                        <div key={q.id} className={"bg-white p-5 rounded-xl border-l-8 mb-3 shadow-sm " + (ok ? "border-[#7fb088]" : "border-[#c0392b]")}>
+                                            <p className="font-bold text-sm mb-2">{i+1}. {q.question}</p>
+                                            <div className="space-y-1.5">
+                                                {q.options.map((opt, idx) => (
+                                                    <div key={idx} className={"p-2.5 rounded-lg text-xs font-medium border " + (idx===q.correctIndex ? "bg-[#7fb088] text-white" : (a&&a.selection===idx ? "bg-[#c0392b] text-white" : "bg-gray-50 text-gray-400"))}>{opt}</div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                                {OPEN && (
+                                    <div className="bg-white p-5 rounded-xl border-l-8 border-[#34495e] shadow-sm">
+                                        <p className="font-bold text-sm mb-2">Quesito Aperto</p>
+                                        <div className="bg-gray-50 p-3 rounded-lg text-xs leading-relaxed border whitespace-pre-wrap">{student.openAnswer || "—"}</div>
+                                        {student.openComment && <div className="mt-3 bg-blue-50 p-3 rounded-lg text-xs"><b>Nota:</b> {student.openComment}</div>}
+                                    </div>
+                                )}
                             </div>
                         );
-                    })}
-                    {OPEN && (
-                        <div className="bg-white p-5 rounded-xl border-l-8 border-[#34495e] shadow-sm">
-                            <p className="font-bold text-sm mb-2">Quesito Aperto</p>
-                            <div className="bg-gray-50 p-3 rounded-lg text-xs leading-relaxed border whitespace-pre-wrap">\${student.openAnswer || "—"}</div>
-                            {student.openComment && <div className="mt-3 bg-blue-50 p-3 rounded-lg text-xs"><b>Nota:</b> \${student.openComment}</div>}
-                        </div>
-                    )}
-                </div>
-            );
-        }
+                    }
 
-        return (
-            <div className="max-w-4xl mx-auto px-4 py-6">
-                <div className="bg-[#34495e] text-white p-6 rounded-2xl mb-6 shadow-md">
-                    <h1 className="text-xl font-bold">Consultazione Storica offline · Classe \${D.cls}</h1>
-                    <p className="text-xs text-white/70 mt-1">Generato in data \${new Date(D.generatedAt).toLocaleString('it-IT')}</p>
-                </div>
-                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                    <table className="w-full text-sm text-left">
-                        <thead className="bg-gray-50 text-gray-500 text-xs uppercase"><tr><th className="p-4">PIN</th><th className="p-4">Studente</th><th className="p-4 text-center">Esito %</th></tr></thead>
-                        <tbody>
-                            {students.map(s => {
-                                const tot = (s.closedScore||0) + (s.openScore||0);
-                                const pct = Math.round(tot / D.maxTotal * 100);
-                                return (
-                                    <tr key={s.pin} onClick={()=>setSel(s.pin)} className="border-t hover:bg-gray-50 cursor-pointer">
-                                        <td className="p-4 font-mono font-bold text-[#34495e]">\${s.pin}</td>
-                                        <td className="p-4 font-semibold">\${s.lastName} \${s.firstName}</td>
-                                        <td className="p-4 text-center font-bold">\${pct}%</td>
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        );
-    }
-    ReactDOM.createRoot(document.getElementById('root')).render(<ArchiveApp/>);
-<\/script></body></html>`;
+                    return (
+                        <div className="max-w-4xl mx-auto px-4 py-6">
+                            <div className="bg-[#34495e] text-white p-6 rounded-2xl mb-6 shadow-md">
+                                <h1 className="text-xl font-bold">Consultazione Storica offline · Classe {D.cls}</h1>
+                                <p className="text-xs text-white/70 mt-1">Generato in data {new Date(D.generatedAt).toLocaleString('it-IT')}</p>
+                            </div>
+                            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                                <table className="w-full text-sm text-left">
+                                    <thead className="bg-gray-50 text-gray-500 text-xs uppercase"><tr><th className="p-4">PIN</th><th className="p-4">Studente</th><th className="p-4 text-center">Esito %</th></tr></thead>
+                                    <tbody>
+                                        {students.map(s => {
+                                            const tot = (s.closedScore||0) + (s.openScore||0);
+                                            const pct = Math.round(tot / D.maxTotal * 100);
+                                            return (
+                                                <tr key={s.pin} onClick={()=>setSel(s.pin)} className="border-t hover:bg-gray-50 cursor-pointer">
+                                                    <td className="p-4 font-mono font-bold text-[#34495e]">{s.pin}</td>
+                                                    <td className="p-4 font-semibold">{s.lastName} {s.firstName}</td>
+                                                    <td className="p-4 text-center font-bold">{pct}%</td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    );
+                }
+                ReactDOM.createRoot(document.getElementById('root')).render(<ArchiveApp/>);
+            `;
+
+            return [
+                '<!DOCTYPE html>',
+                '<html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">',
+                '<title>Archivio Storico Verifica ' + cls + '</title>',
+                '<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin><\/script>',
+                '<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin><\/script>',
+                '<script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>',
+                '<script src="https://cdn.tailwindcss.com"><\/script>',
+                '<style>@import url(\'https://fonts.googleapis.com/css2?family=Cabin:wght@400;500;600;700&display=swap\');body{font-family:Cabin,sans-serif;background:#fcfcfc;color:#2e2e2e;}</style>',
+                '</head><body><div id="root"></div>',
+                '<script>window.__ARCHIVE__ = ' + dataJson + ';<\/script>',
+                '<script type="text/babel">' + archScript + '<\/script>',
+                '</body></html>'
+            ].join('\n');
         };
 
+        /* =====================================================================
+           CORE CORE CORE DIRECTING DISPATCHER CON SYNC REALTIME CLOUD
+        ===================================================================== */
         const App = () => {
             const [view, setView] = useState('landing'); 
             const [session, setSession] = useState(null);
@@ -1019,19 +1032,17 @@
             const pullCloudState = async () => {
                 const { data, error } = await supabase.from('app_state').select('db_data, questions_data').eq('id', 1).single();
                 if (!error && data) {
-                    setDb({ version: 1, classes: data.db_data.classes || {}, questions: data.questions_data || [] });
+                    setDb({ version: 1, classes: data.db_data?.classes || {}, questions: data.questions_data || [] });
                 }
                 setLoading(false);
             };
 
             useEffect(() => {
                 pullCloudState();
-                
                 const intervalId = setInterval(() => {
                     pullCloudState();
-                }, 3000); 
-
-                return () => { clearInterval(intervalId); };
+                }, 3000);
+                return () => clearInterval(intervalId);
             }, []);
 
             useEffect(() => {
@@ -1058,7 +1069,6 @@
             };
 
             const resetDatabaseCloud = async () => {
-                const clearState = { classes: {}, questions: [] };
                 setDb({ version: 1, classes: {}, questions: [] });
                 await supabase.from('app_state').update({ db_data: { classes: {} }, questions_data: [] }).eq('id', 1);
             };
@@ -1069,21 +1079,28 @@
                 const { cls, student } = found;
 
                 if (student.status === 'idle') {
-                    // Primo accesso
                     const updated = { ...student, status: 'playing', startedAt: Date.now(), optionOrder: buildOptionOrder(db.questions) };
                     sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
-                    setSession({ pin, cls }); 
-                    setView('student');
+                    setSession({ pin, cls }); setView('student');
                     syncUpdateCloud(cls, pin, updated);
                     callback({ ok: true });
-                } else {
-                    // Secondo accesso rilevato (blocco automatico)
-                    let updated = student;
-                    if (student.status === 'playing') {
-                        updated = { ...student, status: 'locked' };
-                        syncUpdateCloud(cls, pin, updated);
-                    }
-                    callback({ ok: false, msg: "ATTENZIONE: Accesso negato (PIN già utilizzato o bloccato). Chiama il docente." });
+                } else if (student.status === 'submitted' || student.status === 'published') {
+                    // Entra senza problemi per vedere la correzione/risultati
+                    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
+                    setSession({ pin, cls }); setView('student');
+                    callback({ ok: true });
+                } else if (student.status === 'playing') {
+                    // Blocco anti-furbetto: era in playing e sta usando un nuovo dispositivo/scheda
+                    const updated = { ...student, status: 'locked' };
+                    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
+                    setSession({ pin, cls }); setView('student');
+                    syncUpdateCloud(cls, pin, updated);
+                    callback({ ok: true });
+                } else if (student.status === 'locked') {
+                    // Già bloccato, va alla pagina di blocco
+                    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
+                    setSession({ pin, cls }); setView('student');
+                    callback({ ok: true });
                 }
             };
 
@@ -1095,8 +1112,8 @@
 
             if (loading) {
                 return (
-                    <div className="flex-grow flex items-center justify-center bg-white">
-                        <div className="text-center font-bold text-[#34495e]">Connessione al Cloud Engine...</div>
+                    <div className="flex-grow flex items-center justify-center bg-[#fcfcfc]">
+                        <div className="text-center font-bold text-[#34495e] text-lg">Connessione al Cloud Engine in corso...</div>
                     </div>
                 );
             }
