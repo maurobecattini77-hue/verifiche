@@ -612,6 +612,10 @@
             const closedQuestions = questions.filter(q => q.type !== 'open');
             const openQuestions = questions.filter(q => q.type === 'open');
 
+            // Nuove variabili per le percentuali parziali
+            const closedPercent = maxClosed > 0 ? Math.round((closed / maxClosed) * 100) : 0;
+            const openPercent = maxOpen > 0 ? Math.round((open / maxOpen) * 100) : 0;
+
             return (
                 <div>
                     <div className="flex items-center justify-between mb-4">
@@ -622,7 +626,7 @@
                         {reveal ? (
                             <div className="text-right">
                                 <div className={`text-3xl font-extrabold tracking-tight ${passed ? 'text-[#7fb088]' : 'text-[#c0392b]'}`}>{percent}%</div>
-                                <div className="text-xs font-semibold text-[#756f63]">{total.toFixed(1)}/{maxTotal} · {(total/maxTotal*10).toFixed(1)}/10</div>
+                                <div className="text-xs font-semibold text-[#756f63]">VOTO FINALE</div>
                             </div>
                         ) : (
                             <div className="text-right">
@@ -634,8 +638,8 @@
 
                     {reveal && (
                         <div className="flex gap-2 mb-4 text-xs font-semibold">
-                            <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Chiuse: {closed.toFixed(1)}/{maxClosed}</span>
-                            <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Aperte: {open.toFixed(1)}/{maxOpen}</span>
+                            <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Chiuse: {closedPercent}%</span>
+                            <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Aperte: {openPercent}%</span>
                         </div>
                     )}
 
@@ -1136,7 +1140,7 @@
                                                     const answeredCount = questions.filter(q => {
                                                         const a = s.answers[q.id];
                                                         if (!a) return false;
-                                                        if (q.type === 'open') return !!a.selection && String(a.selection).trim().length > 0;
+                                                        if (q.type === 'open') return !!ans.selection && String(ans.selection).trim().length > 0;
                                                         return a.selection !== undefined;
                                                     }).length;
 
@@ -1145,6 +1149,11 @@
                                                     const tot = submitted ? (closed + openScore) : null;
                                                     const canView = submitted || playing;
                                                     const sGraded = isGraded(s, questions);
+
+                                                    // Calcolo percentuali per la tabella Admin
+                                                    const closedPercent = submitted && maxClosed > 0 ? Math.round((closed / maxClosed) * 100) : null;
+                                                    const openPercent = submitted && sGraded && maxOpen > 0 ? Math.round((openScore / maxOpen) * 100) : null;
+                                                    const totPercent = submitted && sGraded && maxTotal > 0 ? Math.round((tot / maxTotal) * 100) : null;
 
                                                     return (
                                                         <tr key={s.pin} className="border-t border-gray-100 hover:bg-gray-50/60">
@@ -1156,9 +1165,9 @@
                                                                     {playing && <span className="text-xs font-bold text-[#34495e]">{answeredCount}/{questions.length}</span>}
                                                                 </div>
                                                             </td>
-                                                            <td className="px-4 py-3 text-center font-semibold text-[#34495e]">{closed != null ? `${closed.toFixed(1)}/${maxClosed}` : '—'}</td>
-                                                            <td className="px-4 py-3 text-center font-semibold">{submitted ? (sGraded ? `${openScore.toFixed(1)}/${maxOpen}` : <span className="text-[#c0392b]">da valutare</span>) : '—'}</td>
-                                                            <td className="px-4 py-3 text-center">{tot != null ? <span className="inline-flex items-center gap-1 font-extrabold text-[#34495e]">{tot.toFixed(1)}/{maxTotal}{sGraded && <Icon name="lock" size={12} className="text-[#7fb088]" />}</span> : <span className="text-gray-400">—</span>}</td>
+                                                            <td className="px-4 py-3 text-center font-semibold text-[#34495e]">{closedPercent != null ? `${closedPercent}%` : '—'}</td>
+                                                            <td className="px-4 py-3 text-center font-semibold">{submitted ? (sGraded ? `${openPercent}%` : <span className="text-[#c0392b]">da valutare</span>) : '—'}</td>
+                                                            <td className="px-4 py-3 text-center">{totPercent != null ? <span className="inline-flex items-center gap-1 font-extrabold text-[#34495e]">{totPercent}%{sGraded && <Icon name="lock" size={12} className="text-[#7fb088]" />}</span> : <span className="text-gray-400">—</span>}</td>
                                                             <td className="px-4 py-3">
                                                                 <div className="flex justify-end gap-1.5 flex-wrap">
                                                                     {locked && <button onClick={() => sblocca(s.pin)} className="bg-[#aed6f1]/30 text-[#34495e] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-[#aed6f1]/60"><Icon name="unlock" size={14}/> Sblocca</button>}
@@ -1326,6 +1335,11 @@
                         const open = computeOpenScore(s, questions);
                         const tot = closed + open;
                         const percent = Math.round(tot / maxTotal * 100);
+                        
+                        // Percentuali per stampa
+                        const closedPercent = maxClosed > 0 ? Math.round((closed / maxClosed) * 100) : 0;
+                        const openPercent = maxOpen > 0 ? Math.round((open / maxOpen) * 100) : 0;
+
                         return (
                             <div key={s.pin} className="print-student" style={{ padding: '4mm 0' }}>
                                 <div style={{ borderBottom: '3px solid #34495e', paddingBottom: 8, marginBottom: 14 }}>
@@ -1335,7 +1349,7 @@
                                         <div style={{ fontWeight: 700 }}>Classe {cls} · PIN {s.pin}</div>
                                     </div>
                                     <div style={{ marginTop: 6, fontWeight: 700 }}>
-                                        Punteggio: {tot.toFixed(1)}/{maxTotal} ({percent}%) — Chiuse {closed.toFixed(1)}/{maxClosed}, Aperte {open.toFixed(1)}/{maxOpen} — Voto {(tot/maxTotal*10).toFixed(1)}/10
+                                        VOTO FINALE: {percent}% — Chiuse {closedPercent}%, Aperte {openPercent}%
                                     </div>
                                 </div>
 
@@ -1439,8 +1453,11 @@
                     var open = calcOpen(s);
                     var tot = closed + open;
                     var pct = D.maxTotal ? Math.round(tot/D.maxTotal*100) : 0;
-                    var voto = D.maxTotal ? (tot/D.maxTotal*10) : 0;
                     var passed = pct >= D.SOGLIA;
+                    
+                    var closedPct = D.maxClosed ? Math.round((closed/D.maxClosed)*100) : 0;
+                    var openPct = D.maxOpen ? Math.round((open/D.maxOpen)*100) : 0;
+
                     return (
                         <div className="max-w-3xl mx-auto px-4 py-6">
                             <button onClick={props.back} className="mb-4 text-sm font-bold text-[#34495e] flex items-center gap-1">&larr; Torna all'elenco</button>
@@ -1451,13 +1468,13 @@
                                         <h2 className="text-2xl font-extrabold text-[#34495e]">{s.lastName} {s.firstName}</h2>
                                     </div>
                                     <div className="text-right">
-                                        <div className={"text-4xl font-extrabold " + (passed?"text-[#7fb088]":"text-[#c0392b]")}>{voto.toFixed(1)}<span className="text-base text-[#756f63]">/10</span></div>
-                                        <div className="text-xs font-semibold text-[#756f63] mt-1">{tot.toFixed(1)}/{D.maxTotal} · {pct}%</div>
+                                        <div className={"text-4xl font-extrabold " + (passed?"text-[#7fb088]":"text-[#c0392b]")}>{pct}%</div>
+                                        <div className="text-xs font-semibold text-[#756f63] mt-1">VOTO FINALE</div>
                                     </div>
                                 </div>
                                 <div className="flex gap-2 mt-3 text-xs font-semibold">
-                                    <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Chiuse {closed.toFixed(1)}/{D.maxClosed}</span>
-                                    <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Aperte {open.toFixed(1)}/{D.maxOpen}</span>
+                                    <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Chiuse {closedPct}%</span>
+                                    <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Aperte {openPct}%</span>
                                 </div>
                             </div>
                             
@@ -1565,7 +1582,7 @@
                                     <div className="overflow-x-auto">
                                         <table className="w-full text-sm text-left">
                                             <thead className="bg-gray-50 text-[#756f63] text-xs uppercase">
-                                                <tr><th className="px-4 py-3">PIN</th><th className="px-4 py-3">Studente</th><th className="px-4 py-3 text-center">Chiuse</th><th className="px-4 py-3 text-center">Aperte</th><th className="px-4 py-3 text-center">Totale</th><th className="px-4 py-3 text-center">%</th><th className="px-4 py-3 text-center">Voto</th><th></th></tr>
+                                                <tr><th className="px-4 py-3">PIN</th><th className="px-4 py-3">Studente</th><th className="px-4 py-3 text-center">Chiuse</th><th className="px-4 py-3 text-center">Aperte</th><th className="px-4 py-3 text-center">Totale</th><th></th></tr>
                                             </thead>
                                             <tbody>
                                                 {students.map(function(s){
@@ -1573,16 +1590,16 @@
                                                     var open = calcOpen(s);
                                                     var tot = closed+open;
                                                     var pct = D.maxTotal?Math.round(tot/D.maxTotal*100):0;
-                                                    var voto = D.maxTotal?(tot/D.maxTotal*10):0;
+                                                    var closedPct = D.maxClosed?Math.round((closed/D.maxClosed)*100):0;
+                                                    var openPct = D.maxOpen?Math.round((open/D.maxOpen)*100):0;
+                                                    
                                                     return (
                                                         <tr key={s.pin} onClick={function(){ setSel(s.pin); }} className="border-t border-gray-100 hover:bg-gray-50 cursor-pointer">
                                                             <td className="px-4 py-3 font-mono font-bold text-[#34495e]">{s.pin}</td>
                                                             <td className="px-4 py-3 font-semibold whitespace-nowrap">{s.lastName} {s.firstName}</td>
-                                                            <td className="px-4 py-3 text-center font-semibold text-[#34495e]">{closed.toFixed(1) + "/" + D.maxClosed}</td>
-                                                            <td className="px-4 py-3 text-center font-semibold">{open.toFixed(1) + "/" + D.maxOpen}</td>
-                                                            <td className="px-4 py-3 text-center font-extrabold text-[#34495e]">{tot.toFixed(1) + "/" + D.maxTotal}</td>
-                                                            <td className={"px-4 py-3 text-center font-extrabold " + (pct>=D.SOGLIA?"text-[#7fb088]":"text-[#c0392b]")}>{pct + "%"}</td>
-                                                            <td className="px-4 py-3 text-center font-bold">{voto.toFixed(1)}</td>
+                                                            <td className="px-4 py-3 text-center font-semibold text-[#34495e]">{closedPct}%</td>
+                                                            <td className="px-4 py-3 text-center font-semibold">{openPct}%</td>
+                                                            <td className={"px-4 py-3 text-center font-extrabold " + (pct>=D.SOGLIA?"text-[#7fb088]":"text-[#c0392b]")}>{pct}%</td>
                                                             <td className="px-4 py-3 text-right text-gray-300">&rsaquo;</td>
                                                         </tr>
                                                     );
