@@ -1,749 +1,1132 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Verifiche · Arte Bianca di Neive</title>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script src="https://cdn.tailwindcss.com"></script>
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800;900&display=swap');
-body{font-family:'Montserrat',sans-serif;background:#fcfcfc;color:#2e2e2e;-webkit-tap-highlight-color:transparent;}
-::-webkit-scrollbar{width:8px;height:8px;}
-::-webkit-scrollbar-track{background:#f1f1f1;}
-::-webkit-scrollbar-thumb{background:#d2b4de;border-radius:4px;}
-.fade-in{animation:fadeIn .35s ease-out forwards;}
-@keyframes fadeIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
-.spin{animation:spin 1s linear infinite;}
-@keyframes spin{to{transform:rotate(360deg);}}
-</style>
-<script>
-tailwind.config={theme:{extend:{colors:{ab:{blue:'#34495e',red:'#c0392b',lightblue:'#aed6f1',green:'#7fb088',yellow:'#f7dd73',brown:'#756f63',dark:'#2e2e2e',lavender:'#d2b4de'}},boxShadow:{card:'0 4px 6px -1px rgba(0,0,0,.05),0 2px 4px -1px rgba(0,0,0,.03)'}}}}
-</script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Verifiche · prof. Becattini</title>
+
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Supabase Client -->
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Cabin:wght@400;500;600;700&display=swap');
+
+        body {
+            font-family: 'Cabin', sans-serif;
+            background-color: #fcfcfc;
+            color: #2e2e2e;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #d2b4de; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #34495e; }
+
+        .fade-in { animation: fadeIn 0.4s ease-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .bounce-in { animation: bounceIn 0.7s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards; }
+        @keyframes bounceIn { 0% { transform: scale(0); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+        .pulse-red { animation: pulseRed 1.6s ease-in-out infinite; }
+        @keyframes pulseRed { 0%,100% { opacity: 1; } 50% { opacity: 0.65; } }
+        .scale-hover { transition: transform .15s ease; }
+        .scale-hover:hover { transform: scale(1.02); }
+
+        /* ====== STAMPA / EXPORT PDF ====== */
+        #print-area { display: none; }
+        @media print {
+            @page { size: A4; margin: 16mm 14mm; }
+            body { background: #ffffff !important; }
+            .no-print { display: none !important; }
+            #root { display: none !important; }
+            #print-area { display: block !important; }
+            .print-student { page-break-after: always; }
+            .print-student:last-child { page-break-after: auto; }
+            .print-q { page-break-inside: avoid; }
+        }
+    </style>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        ab: {
+                            blue: '#34495e',
+                            red: '#c0392b',
+                            lightblue: '#aed6f1',
+                            green: '#7fb088',
+                            yellow: '#f7dd73',
+                            amber: '#e0a85c',
+                            brown: '#756f63',
+                            dark: '#2e2e2e',
+                            lavender: '#d2b4de',
+                            white: '#ffffff'
+                        }
+                    },
+                    boxShadow: {
+                        'card': '0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03)',
+                        'hover': '0 10px 15px -3px rgba(0,0,0,0.07), 0 4px 6px -2px rgba(0,0,0,0.03)'
+                    }
+                }
+            }
+        }
+    </script>
 </head>
-<body class="min-h-screen flex flex-col">
-<div id="root" class="flex-grow flex flex-col"></div>
+<body class="min-h-screen flex flex-col bg-[#fcfcfc]">
 
-<script type="text/babel">
-const { useState, useEffect, useRef, useCallback } = React;
+    <div id="root" class="flex-grow flex flex-col relative"></div>
+    <div id="print-area"></div>
 
-/* ====================================================================
-   CONFIGURAZIONE
-==================================================================== */
-// Indirizzo del motore dati (Apps Script). NON pubblicarlo in giro.
-const API_URL = "https://script.google.com/macros/s/AKfycbwQIsd32k4LRcOPGO9YzbesiA6xBd0vTmVxc_b-IKIdwMxH8j5bqJosAqREfgWxBm0l/exec";
-const ADMIN_PASSWORD = "16031948";
-const SOGLIA = 60; // % sufficienza
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
 
-// Verifica incorporata per il collaudo (poi la renderemo caricabile da file)
-const QUIZ_MARKETING = {
-  "quizId": "marketing-2026",
-  "titolo": "Marketing e Strategie Aziendali",
-  "domande": [
-    { "tipo": "singola", "punti": 5, "testo": "Che cos'è il marketing in senso moderno?",
-      "opzioni": [
-        "L'insieme delle attività con cui l'impresa individua i bisogni del mercato e li soddisfa creando valore per il cliente e per sé stessa.",
-        "Il reparto aziendale che si occupa esclusivamente di realizzare la pubblicità e gli spot televisivi.",
-        "La tecnica per vendere il maggior numero possibile di prodotti già fabbricati, anche se il cliente non li desidera.",
-        "Il calcolo dei costi di produzione necessario a stabilire il prezzo di vendita di un bene."
-      ], "corretta": 0,
-      "spiegazione": "Il marketing non coincide con la pubblicità né con la semplice vendita: parte dai bisogni del mercato per offrire un valore che soddisfi il cliente, ottenendo in cambio un profitto." },
+        /* =====================================================================
+           CONFIGURAZIONE URL E CHIAVI SUPABASE
+        ===================================================================== */
+        const SUPABASE_URL = "https://zwuutlrafdmfqexbnohc.supabase.co"; 
+        const SUPABASE_ANON_KEY = "sb_publishable_6oCmDuDh_8ibf-p4ZAcfZg_muXXuO8N"; 
 
-    { "tipo": "singola", "punti": 5, "testo": "Qual è la differenza corretta tra «bisogno» e «desiderio» in marketing?",
-      "opzioni": [
-        "Il bisogno è uno stato di mancanza generale (es. nutrirsi); il desiderio è la forma specifica che il bisogno assume (es. un cornetto artigianale).",
-        "Il bisogno riguarda solo i beni di lusso, mentre il desiderio riguarda i beni di prima necessità.",
-        "Bisogno e desiderio sono sinonimi e indicano sempre la stessa identica esigenza del consumatore.",
-        "Il desiderio nasce prima del bisogno ed è ciò che spinge l'impresa a creare nuovi prodotti."
-      ], "corretta": 0,
-      "spiegazione": "Il bisogno è una carenza di fondo comune a tutti; il desiderio è il modo personale e culturale in cui quel bisogno si concretizza." },
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    { "tipo": "singola", "punti": 5, "testo": "Quali sono le quattro leve del «marketing mix» (le 4 P)?",
-      "opzioni": [
-        "Product (Prodotto), Price (Prezzo), Place (Distribuzione), Promotion (Promozione/Comunicazione).",
-        "Pubblicità, Prezzo, Produzione, Personale.",
-        "Prodotto, Profitto, Pubblicità, Pianificazione.",
-        "Posizionamento, Pubblico, Promozione, Performance."
-      ], "corretta": 0,
-      "spiegazione": "Il marketing mix combina quattro leve operative: Product, Price, Place e Promotion." },
+        const ADMIN_PASSWORD = "admin";      
+        const SESSION_KEY = "ab_exam_session_v1"; 
+        const SOGLIA_SUFFICIENZA = 60;            
 
-    { "tipo": "singola", "punti": 5, "testo": "Che cosa si intende per «segmentazione del mercato»?",
-      "opzioni": [
-        "Suddividere il mercato in gruppi omogenei di consumatori con bisogni e caratteristiche simili.",
-        "Ridurre progressivamente i prezzi per eliminare i concorrenti più deboli dal mercato.",
-        "Dividere il territorio nazionale in zone geografiche per organizzare le consegne.",
-        "Frazionare il prodotto in confezioni più piccole per aumentarne le vendite."
-      ], "corretta": 0,
-      "spiegazione": "Segmentare significa scomporre un mercato eterogeneo in gruppi omogenei per bisogni, comportamenti o caratteristiche." },
+        /* =====================================================================
+           UTILS PER IL GOVERNO DELLE RISPOSTE E DEI PUNTEGGI
+        ===================================================================== */
+        const shuffle = (arr) => {
+            const a = [...arr];
+            for (let i = a.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [a[i], a[j]] = [a[j], a[i]];
+            }
+            return a;
+        };
 
-    { "tipo": "singola", "punti": 5, "testo": "Nel processo di marketing, che cosa rappresenta il «target» (mercato obiettivo)?",
-      "opzioni": [
-        "Il segmento o l'insieme di segmenti che l'impresa sceglie di servire concentrandovi le proprie risorse.",
-        "Il fatturato massimo che l'azienda si prefigge di raggiungere entro la fine dell'anno.",
-        "Il prezzo ideale a cui l'impresa punta a vendere il proprio prodotto di punta.",
-        "L'insieme di tutti i potenziali clienti presenti sul mercato, senza alcuna distinzione."
-      ], "corretta": 0,
-      "spiegazione": "Dopo aver segmentato, l'impresa sceglie quali segmenti servire: questo è il target." },
+        const buildOptionOrder = (questions) => {
+            const order = {};
+            questions.filter(q => q.type === 'single').forEach(q => {
+                order[q.id] = shuffle(q.options.map((_, i) => i));
+            });
+            return order;
+        };
 
-    { "tipo": "singola", "punti": 5, "testo": "Che cos'è il «posizionamento» di un prodotto o di una marca?",
-      "opzioni": [
-        "L'immagine distintiva che il prodotto occupa nella mente del consumatore rispetto ai concorrenti.",
-        "Il punto del negozio (scaffale o vetrina) in cui il prodotto viene fisicamente collocato.",
-        "La posizione dell'azienda nella classifica di fatturato del proprio settore.",
-        "Il luogo geografico in cui conviene aprire un nuovo punto vendita."
-      ], "corretta": 0,
-      "spiegazione": "Il posizionamento è percettivo: riguarda come il prodotto è collocato nella mente del cliente rispetto alla concorrenza." },
+        const computeClosedScore = (student, questions) => {
+            let s = 0;
+            questions.filter(q => q.type === 'single').forEach(q => {
+                const a = student.answers[q.id];
+                if (a && a.selection === q.correctIndex) s += q.points;
+            });
+            return s;
+        };
+        
+        const totalScore = (student, questions) => {
+            const closed = student.closedScore != null ? student.closedScore : computeClosedScore(student, questions);
+            const open = student.openScore != null ? student.openScore : 0;
+            return closed + open;
+        };
 
-    { "tipo": "singola", "punti": 5, "testo": "Nell'analisi SWOT, come sono classificati i quattro fattori?",
-      "opzioni": [
-        "Punti di forza e di debolezza sono interni all'impresa; opportunità e minacce sono esterni (ambiente/mercato).",
-        "Punti di forza e opportunità sono interni; debolezze e minacce sono esterni.",
-        "Tutti e quattro i fattori sono esterni e dipendono unicamente dai concorrenti.",
-        "Tutti e quattro i fattori sono interni e dipendono solo dalle scelte dell'imprenditore."
-      ], "corretta": 0,
-      "spiegazione": "La SWOT distingue i fattori interni controllabili (forza/debolezza) dai fattori esterni non controllabili (opportunità/minacce)." },
+        const findStudent = (classes, pin) => {
+            for (const cls of Object.keys(classes)) {
+                if (classes[cls].students[pin]) {
+                    return { cls, student: classes[cls].students[pin] };
+                }
+            }
+            return null;
+        };
 
-    { "tipo": "singola", "punti": 5, "testo": "Quali sono, nell'ordine, le fasi del ciclo di vita di un prodotto?",
-      "opzioni": [
-        "Introduzione, crescita, maturità, declino.",
-        "Progettazione, produzione, vendita, smaltimento.",
-        "Lancio, sconto, promozione, ritiro.",
-        "Crescita, maturità, introduzione, declino."
-      ], "corretta": 0,
-      "spiegazione": "Dopo l'introduzione si ha la crescita, poi la maturità (vendite massime e stabili) e infine il declino." },
+        /* =====================================================================
+           ICONE
+        ===================================================================== */
+        const Icon = ({ name, size = 20, className = "" }) => {
+            const p = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", xmlns: "http://www.w3.org/2000/svg" };
+            const icons = {
+                prev: <svg {...p}><polyline points="15 18 9 12 15 6"/></svg>,
+                next: <svg {...p}><polyline points="9 18 15 12 9 6"/></svg>,
+                check: <svg {...p}><polyline points="20 6 9 17 4 12"/></svg>,
+                x: <svg {...p}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+                alert: <svg {...p}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>,
+                lock: <svg {...p}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>,
+                unlock: <svg {...p}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>,
+                send: <svg {...p}><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>,
+                medal: <svg {...p}><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></svg>,
+                users: <svg {...p}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
+                edit: <svg {...p}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
+                print: <svg {...p}><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>,
+                trash: <svg {...p}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>,
+                eye: <svg {...p}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>,
+                logout: <svg {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
+                chevron: <svg {...p}><polyline points="6 9 12 15 18 9"/></svg>,
+                clock: <svg {...p}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
+                shield: <svg {...p}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
+                key: <svg {...p}><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>,
+                archive: <svg {...p}><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>,
+                upload: <svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            };
+            return <span className={className}>{icons[name]}</span>;
+        };
 
-    { "tipo": "singola", "punti": 5, "testo": "In che cosa consiste la strategia di prezzo detta di «scrematura» (skimming)?",
-      "opzioni": [
-        "Lanciare il prodotto a un prezzo elevato rivolto ai clienti disposti a pagare di più, abbassandolo poi nel tempo.",
-        "Fissare fin dall'inizio un prezzo molto basso per conquistare rapidamente una grande quota di mercato.",
-        "Mantenere lo stesso prezzo dei concorrenti per non scatenare una guerra dei prezzi.",
-        "Vendere il prodotto sottocosto per liberare il magazzino dalle rimanenze."
-      ], "corretta": 0,
-      "spiegazione": "La scrematura parte da un prezzo alto per i clienti meno sensibili al prezzo, poi lo riduce. È l'opposto della penetrazione." },
-
-    { "tipo": "singola", "punti": 5, "testo": "A quale logica risponde il cosiddetto «prezzo psicologico» (es. 9,99 € invece di 10,00 €)?",
-      "opzioni": [
-        "Far percepire al cliente il prezzo come sensibilmente più basso, sfruttando la lettura della prima cifra.",
-        "Coprire esattamente i costi di produzione lasciando un margine di profitto fisso del 99%.",
-        "Rispettare un obbligo di legge che vieta di esporre prezzi con cifre tonde.",
-        "Indicare che il prodotto è in promozione temporanea e tornerà presto al prezzo pieno."
-      ], "corretta": 0,
-      "spiegazione": "9,99 € viene percepito come «nove e qualcosa», quindi più conveniente di 10 €, pur con differenza minima." },
-
-    { "tipo": "singola", "punti": 5, "testo": "Che cosa comprende il «mix di comunicazione» (promotion) di un'impresa?",
-      "opzioni": [
-        "Pubblicità, promozioni delle vendite, relazioni pubbliche, vendita personale e marketing diretto/digitale.",
-        "Soltanto gli spot televisivi e i cartelloni pubblicitari.",
-        "L'insieme dei prezzi praticati nei diversi canali di vendita.",
-        "La rete dei fornitori e dei trasportatori che riforniscono il punto vendita."
-      ], "corretta": 0,
-      "spiegazione": "La comunicazione comprende pubblicità, promozioni, relazioni pubbliche, vendita personale e strumenti diretti/digitali." },
-
-    { "tipo": "singola", "punti": 5, "testo": "Qual è la differenza tra canale di distribuzione «diretto» e «indiretto»?",
-      "opzioni": [
-        "Nel canale diretto il produttore vende direttamente al consumatore; in quello indiretto intervengono uno o più intermediari.",
-        "Nel canale diretto si vende solo online; in quello indiretto solo nei negozi fisici.",
-        "Nel canale diretto i prezzi sono fissi; in quello indiretto sono sempre trattabili.",
-        "Nel canale diretto si vende all'ingrosso; in quello indiretto solo al dettaglio."
-      ], "corretta": 0,
-      "spiegazione": "La differenza è la presenza di intermediari: nel diretto non ce ne sono, nell'indiretto si inseriscono grossisti e/o dettaglianti." },
-
-    { "tipo": "singola", "punti": 5, "testo": "Qual è la funzione principale della «marca» (brand) per il consumatore?",
-      "opzioni": [
-        "Identificare il prodotto, distinguerlo dai concorrenti e garantirne origine e qualità nel tempo.",
-        "Aumentare obbligatoriamente il peso e le dimensioni della confezione.",
-        "Ridurre per legge il prezzo del prodotto rispetto ai prodotti senza marca.",
-        "Indicare la data di scadenza e gli ingredienti previsti dall'etichetta."
-      ], "corretta": 0,
-      "spiegazione": "La marca identifica e garantisce: permette di riconoscere il prodotto, distinguerlo e fidarsi di una qualità costante." },
-
-    { "tipo": "singola", "punti": 5, "testo": "Qual è oggi uno dei principali vantaggi del marketing digitale e dei social media per una piccola impresa?",
-      "opzioni": [
-        "Raggiungere un pubblico mirato con costi contenuti e misurare in modo preciso i risultati delle iniziative.",
-        "Eliminare del tutto la necessità di avere un prodotto di buona qualità.",
-        "Garantire automaticamente la vendita di tutta la produzione, senza alcuno sforzo.",
-        "Sostituire completamente e in ogni caso il rapporto diretto con il cliente."
-      ], "corretta": 0,
-      "spiegazione": "I canali digitali permettono di rivolgersi a un pubblico selezionato con costi ridotti e di misurare i risultati con dati precisi." },
-
-    { "tipo": "singola", "punti": 5, "testo": "Perché la «fidelizzazione» del cliente è considerata strategicamente conveniente?",
-      "opzioni": [
-        "Mantenere un cliente acquisito costa in genere meno che conquistarne uno nuovo, e un cliente fedele acquista di più e consiglia l'impresa.",
-        "Un cliente fedele è obbligato per contratto ad acquistare solo da quell'impresa.",
-        "La fidelizzazione consente di aumentare liberamente i prezzi senza alcuna conseguenza.",
-        "I clienti fedeli rinunciano automaticamente a qualsiasi forma di garanzia sul prodotto."
-      ], "corretta": 0,
-      "spiegazione": "Trattenere un cliente costa meno che acquisirne uno nuovo; inoltre il cliente fedele riacquista e genera passaparola." },
-
-    { "tipo": "singola", "punti": 5, "testo": "Qual è la differenza tra «mission» e «vision» di un'impresa?",
-      "opzioni": [
-        "La mission esprime la ragion d'essere e ciò che l'impresa fa oggi; la vision indica l'obiettivo di lungo periodo, ciò che l'impresa aspira a diventare.",
-        "La mission riguarda i dipendenti, mentre la vision riguarda esclusivamente gli azionisti.",
-        "La mission è il bilancio annuale, mentre la vision è il piano finanziario triennale.",
-        "Mission e vision sono la stessa cosa e vengono usate come sinonimi nei documenti aziendali."
-      ], "corretta": 0,
-      "spiegazione": "La mission dice chi siamo e cosa facciamo oggi; la vision proietta l'impresa verso ciò che vuole diventare." },
-
-    { "tipo": "singola", "punti": 5, "testo": "Secondo Porter, su quali due grandi strategie può fondarsi il vantaggio competitivo di un'impresa?",
-      "opzioni": [
-        "Leadership di costo (offrire a costi/prezzi più bassi) e differenziazione (offrire qualcosa di unico e distintivo).",
-        "Aumento dei prezzi e riduzione della qualità.",
-        "Pubblicità aggressiva e licenziamento del personale.",
-        "Espansione geografica e riduzione della gamma di prodotti."
-      ], "corretta": 0,
-      "spiegazione": "Il vantaggio competitivo deriva dall'essere più efficienti (leadership di costo) o dall'offrire qualcosa di unico (differenziazione)." },
-
-    { "tipo": "singola", "punti": 5, "testo": "A che cosa serve l'analisi della concorrenza (benchmarking)?",
-      "opzioni": [
-        "Conoscere punti di forza e di debolezza dei concorrenti per individuare spazi di mercato e migliorare la propria offerta.",
-        "Copiare integralmente i prodotti dei concorrenti per rivenderli a un prezzo inferiore.",
-        "Stabilire accordi segreti con i concorrenti per fissare insieme i prezzi di vendita.",
-        "Eliminare ogni forma di pubblicità per non attirare l'attenzione dei rivali."
-      ], "corretta": 0,
-      "spiegazione": "Studiare i concorrenti aiuta a scoprire bisogni non soddisfatti e a posizionarsi meglio. Gli accordi sui prezzi sono invece vietati." },
-
-    { "tipo": "singola", "punti": 5, "testo": "Qual è la differenza tra ricerche di mercato «quantitative» e «qualitative»?",
-      "opzioni": [
-        "Le quantitative misurano dati numerici su grandi campioni (es. questionari); le qualitative indagano in profondità motivazioni e opinioni su pochi soggetti (es. interviste).",
-        "Le quantitative si fanno solo online, le qualitative solo di persona.",
-        "Le quantitative riguardano i prezzi, le qualitative riguardano i colori del prodotto.",
-        "Le quantitative sono gratuite, mentre le qualitative hanno sempre un costo elevatissimo."
-      ], "corretta": 0,
-      "spiegazione": "Le quantitative rispondono al «quanto» su campioni ampi; le qualitative approfondiscono il «perché» su pochi soggetti." },
-
-    { "tipo": "aperta", "punti": 5, "testo": "La tua pasticceria vuole lanciare una nuova linea di prodotti senza glutine. Spiega come applicheresti almeno tre leve del marketing mix (le 4 P) a questo lancio, motivando ogni scelta.",
-      "griglia": "0–5: si valuti l'identificazione di almeno tre leve tra Product, Price, Place e Promotion; la coerenza con il prodotto «senza glutine» e con il target; la chiarezza del linguaggio tecnico." }
-  ]
-};
-
-/* ====================================================================
-   CHIAMATA AL MOTORE
-   Invio via GET con i dati nel parametro ?p=... : il canale GET è quello
-   affidabile (le richieste POST verso Apps Script in alcuni ambienti non
-   raggiungono il motore). Il "&t=" evita la cache del browser.
-==================================================================== */
-async function api(payload, tentativi = 3) {
-  let ultimoErrore;
-  const url = API_URL + '?p=' + encodeURIComponent(JSON.stringify(payload)) + '&t=' + Date.now();
-  for (let i = 0; i < tentativi; i++) {
-    try {
-      const res = await fetch(url, { method: 'GET', redirect: 'follow' });
-      const data = await res.json();
-      return data;
-    } catch (e) {
-      ultimoErrore = e;
-      await new Promise(r => setTimeout(r, 800 * (i + 1))); // attende e riprova
-    }
-  }
-  return { ok: false, error: 'RETE', dettaglio: String(ultimoErrore) };
-}
-
-/* ====================================================================
-   ICONE
-==================================================================== */
-const Icon = ({ name, size = 20, className = "" }) => {
-  const p = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", xmlns: "http://www.w3.org/2000/svg" };
-  const icons = {
-    key: <svg {...p}><path d="M21 2l-2 2m-7.6 7.6a5.5 5.5 0 1 1-7.8 7.8 5.5 5.5 0 0 1 7.8-7.8zM15.5 7.5l3 3L22 7l-3-3"/></svg>,
-    shield: <svg {...p}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
-    next: <svg {...p}><polyline points="9 18 15 12 9 6"/></svg>,
-    prev: <svg {...p}><polyline points="15 18 9 12 15 6"/></svg>,
-    check: <svg {...p}><polyline points="20 6 9 17 4 12"/></svg>,
-    x: <svg {...p}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
-    send: <svg {...p}><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>,
-    users: <svg {...p}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
-    upload: <svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
-    download: <svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
-    refresh: <svg {...p}><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.5 9a9 9 0 0 1 14.8-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15"/></svg>,
-    logout: <svg {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
-    chevron: <svg {...p}><polyline points="6 9 12 15 18 9"/></svg>,
-    clock: <svg {...p}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
-    doc: <svg {...p}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>,
-    spinner: <svg {...p} className="spin"><path d="M21 12a9 9 0 1 1-6.2-8.5"/></svg>
-  };
-  return <span className={className}>{icons[name]}</span>;
-};
-
-const Spinner = ({ size = 18 }) => <Icon name="spinner" size={size} />;
-
-const Firma = () => (
-  <div className="mt-8 mb-5 text-center opacity-80 select-none">
-    <div className="text-[#34495e] font-bold tracking-widest text-sm">ARTE BIANCA DI NEIVE</div>
-    <div className="text-[#34495e] text-xs font-medium">verifiche online · prof. Mauro Becattini · v2</div>
-  </div>
-);
-
-const Modal = ({ children, onClose, maxW = "max-w-md" }) => (
-  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm fade-in" onClick={onClose}>
-    <div className={`w-full ${maxW} bg-white rounded-3xl shadow-card p-7`} onClick={e => e.stopPropagation()}>{children}</div>
-  </div>
-);
-
-/* ====================================================================
-   PUNTEGGIO domande chiuse
-==================================================================== */
-function scoreDomanda(d, risp) {
-  if (d.tipo === 'singola') return risp === d.corretta ? d.punti : 0;
-  if (d.tipo === 'vero_falso') return risp === d.corretta ? d.punti : 0;
-  if (d.tipo === 'multipla') {
-    const a = Array.isArray(risp) ? [...risp].sort() : [];
-    const b = Array.isArray(d.corrette) ? [...d.corrette].sort() : [];
-    return (a.length === b.length && a.every((v, i) => v === b[i])) ? d.punti : 0;
-  }
-  return 0; // aperta → corretta dal docente
-}
-const isChiusa = d => d.tipo === 'singola' || d.tipo === 'multipla' || d.tipo === 'vero_falso';
-
-function shuffle(arr) {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
-  return a;
-}
-
-/* ====================================================================
-   SCHERMATA INIZIALE
-==================================================================== */
-const Home = ({ onStudente, onDocente }) => {
-  const [pin, setPin] = useState("");
-  const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [pwOpen, setPwOpen] = useState(false);
-  const [pw, setPw] = useState("");
-  const [pwErr, setPwErr] = useState(false);
-
-  const entra = async () => {
-    const clean = pin.trim();
-    if (clean.toLowerCase() === 'admin') { setPwOpen(true); return; }
-    if (!clean) { setErr("Inserisci il tuo PIN."); return; }
-    setErr(""); setBusy(true);
-    const res = await onStudente(clean);
-    setBusy(false);
-    if (res && res.error) setErr(res.error);
-  };
-  const entraDocente = () => {
-    if (pw === ADMIN_PASSWORD) { onDocente(); }
-    else { setPwErr(true); setPw(""); }
-  };
-
-  return (
-    <div className="flex-grow flex flex-col items-center justify-center p-5 fade-in">
-      <div className="w-full max-w-sm bg-white rounded-[2rem] shadow-card p-8 text-center">
-        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[#34495e] text-white mb-4"><Icon name="key" size={30}/></div>
-        <h1 className="text-2xl font-extrabold text-[#34495e] leading-tight">Verifiche online<br/>Arte Bianca di Neive</h1>
-        <p className="text-sm text-[#756f63] mt-2 mb-6">Inserisci il PIN fornito dal docente.</p>
-        <input inputMode="numeric" value={pin} autoFocus
-          onChange={e => { setPin(e.target.value.replace(/[^0-9a-zA-Z]/g, '')); setErr(""); }}
-          onKeyDown={e => e.key === 'Enter' && entra()}
-          placeholder="• • • • •"
-          className="w-full text-center text-3xl font-extrabold tracking-[0.4em] py-4 rounded-2xl border-2 border-gray-200 focus:border-[#34495e] outline-none text-[#34495e]"/>
-        {err && <div className="text-[#c0392b] text-sm font-semibold mt-3">{err}</div>}
-        <button disabled={busy} onClick={entra} className="w-full mt-5 py-4 rounded-2xl font-bold bg-[#34495e] text-white shadow-lg hover:bg-[#2c3e50] disabled:opacity-60 flex items-center justify-center gap-2">
-          {busy ? <><Spinner/> Verifico…</> : <>Entra <Icon name="next" size={18}/></>}
-        </button>
-        <button onClick={() => setPwOpen(true)} className="mt-5 text-xs font-semibold text-gray-400 hover:text-[#34495e] inline-flex items-center gap-1"><Icon name="shield" size={14}/> Accedi come docente</button>
-      </div>
-      <Firma/>
-      {pwOpen && (
-        <Modal onClose={() => { setPwOpen(false); setPw(""); setPwErr(false); }}>
-          <div className="text-center">
-            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-[#34495e]/10 text-[#34495e] mb-3"><Icon name="shield" size={26}/></div>
-            <h3 className="text-xl font-extrabold text-[#34495e]">Area Docente</h3>
-            <p className="text-sm text-[#756f63] mt-1 mb-5">Inserisci la password.</p>
-            <input type="password" value={pw} autoFocus
-              onChange={e => { setPw(e.target.value); setPwErr(false); }}
-              onKeyDown={e => e.key === 'Enter' && entraDocente()}
-              placeholder="Password"
-              className="w-full text-center text-lg font-semibold py-3 rounded-xl border-2 border-gray-200 focus:border-[#34495e] outline-none"/>
-            {pwErr && <div className="text-[#c0392b] text-sm font-semibold mt-3">Password errata.</div>}
-            <div className="grid grid-cols-2 gap-3 mt-5">
-              <button onClick={() => { setPwOpen(false); setPw(""); setPwErr(false); }} className="py-3 rounded-xl font-bold border-2 border-gray-200 text-[#34495e]">Annulla</button>
-              <button onClick={entraDocente} className="py-3 rounded-xl font-bold bg-[#34495e] text-white">Accedi</button>
+        const Signature = ({ light }) => (
+            <div className="mt-8 mb-4 text-center opacity-80 select-none no-print">
+                <div className={`${light ? 'text-white' : 'text-[#34495e]'} font-bold tracking-widest text-sm`}>SISTEMA DI VALUTAZIONE LIVE</div>
+                <div className={`${light ? 'text-white/80' : 'text-[#34495e]'} text-xs font-medium`}>verifica digitale coordinata via cloud</div>
             </div>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-};
+        );
 
-/* ====================================================================
-   DOCENTE
-==================================================================== */
-const Docente = ({ onExit }) => {
-  const [classi, setClassi] = useState([]);
-  const [cls, setCls] = useState("");
-  const [studentiCache, setStudentiCache] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('ab_studenti_cache') || '{}'); } catch (e) { return {}; }
-  });
-  const [risultati, setRisultati] = useState([]);
-  const [quizCorrenti, setQuizCorrenti] = useState({});
-  const [msg, setMsg] = useState(null);
-  const [busy, setBusy] = useState("");
-  const fileClasse = useRef(null);
-  const fileQuiz = useRef(null);
+        const StatusBadge = ({ status }) => {
+            const map = {
+                idle:      { t: "Non iniziato", c: "bg-gray-100 text-gray-500" },
+                playing:   { t: "In corso",     c: "bg-[#aed6f1]/40 text-[#34495e]" },
+                locked:    { t: "Bloccato",     c: "bg-[#c0392b]/10 text-[#c0392b]" },
+                submitted: { t: "Consegnato",   c: "bg-[#f7dd73]/30 text-[#7a6310]" },
+                published: { t: "Pubblicato",   c: "bg-[#7fb088]/15 text-[#4c7a55]" }
+            };
+            const s = map[status] || map.idle;
+            return <span className={`text-xs font-bold px-2.5 py-1 rounded-full whitespace-nowrap ${s.c}`}>{s.t}</span>;
+        };
 
-  const salvaCache = (c) => { setStudentiCache(c); localStorage.setItem('ab_studenti_cache', JSON.stringify(c)); };
-
-  const caricaClassi = useCallback(async () => {
-    const r = await api({ action: 'listClasses', password: ADMIN_PASSWORD });
-    if (r.ok) {
-      setClassi(r.classi);
-      if (!cls && r.classi.length) setCls(r.classi[0].classe);
-    }
-  }, [cls]);
-
-  useEffect(() => { caricaClassi(); }, []);
-  useEffect(() => { if (cls) caricaRisultati(); }, [cls]);
-
-  const caricaRisultati = async () => {
-    if (!cls) return;
-    setBusy('risultati');
-    const r = await api({ action: 'getResults', password: ADMIN_PASSWORD, classe: cls });
-    setBusy('');
-    if (r.ok) setRisultati(r.righe); else setMsg({ t: 'Errore nel caricamento risultati.', e: true });
-  };
-
-  // Carica un file classe JSON
-  const onFileClasse = (e) => {
-    const f = e.target.files[0]; e.target.value = "";
-    if (!f) return;
-    const reader = new FileReader();
-    reader.onload = async () => {
-      let dati;
-      try { dati = JSON.parse(reader.result); } catch (err) { setMsg({ t: 'Il file non è un JSON valido.', e: true }); return; }
-      if (!dati.classe || !Array.isArray(dati.studenti)) { setMsg({ t: 'Formato file classe non valido.', e: true }); return; }
-      setBusy('classe');
-      const r = await api({ action: 'saveClass', password: ADMIN_PASSWORD, classe: dati.classe, studenti: dati.studenti });
-      setBusy('');
-      if (r.ok) {
-        const c = { ...studentiCache, [r.classe]: r.studenti };
-        salvaCache(c);
-        await caricaClassi();
-        setCls(r.classe);
-        setMsg({ t: `Classe ${r.classe} caricata: ${r.studenti.length} studenti con PIN.`, e: false });
-      } else setMsg({ t: 'Errore nel salvataggio della classe.', e: true });
-    };
-    reader.readAsText(f);
-  };
-
-  // Carica un file verifica JSON
-  const onFileQuiz = (e) => {
-    const f = e.target.files[0]; e.target.value = "";
-    if (!f) return;
-    if (!cls) { setMsg({ t: 'Seleziona prima una classe.', e: true }); return; }
-    const reader = new FileReader();
-    reader.onload = async () => {
-      let q;
-      try { q = JSON.parse(reader.result); } catch (err) { setMsg({ t: 'Il file verifica non è un JSON valido.', e: true }); return; }
-      if (!q.quizId || !Array.isArray(q.domande)) { setMsg({ t: 'Formato verifica non valido.', e: true }); return; }
-      setBusy('quiz');
-      const r = await api({ action: 'saveQuiz', password: ADMIN_PASSWORD, classe: cls, quizId: q.quizId, titolo: q.titolo || q.quizId, quiz: q });
-      setBusy('');
-      if (r.ok) { setQuizCorrenti({ ...quizCorrenti, [cls]: q.titolo || q.quizId }); setMsg({ t: `Verifica «${q.titolo || q.quizId}» attivata per la ${cls}.`, e: false }); }
-      else setMsg({ t: 'Errore nel caricamento della verifica.', e: true });
-    };
-    reader.readAsText(f);
-  };
-
-  const esportaCSV = () => {
-    const intest = ['Orario', 'PIN', 'Cognome', 'Nome', 'Classe', 'Verifica', 'Stato', 'PuntiChiuse'];
-    const righe = risultati.map(r => {
-      const pc = r.risposte && r.risposte.punteggioChiuse != null ? r.risposte.punteggioChiuse : r.punteggio;
-      return [new Date(r.timestamp).toLocaleString('it-IT'), r.pin, r.cognome, r.nome, r.classe, r.quizId, r.stato, pc];
-    });
-    const csv = [intest, ...righe].map(r => r.map(c => `"${String(c == null ? '' : c).replace(/"/g, '""')}"`).join(';')).join('\n');
-    const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob); const a = document.createElement('a');
-    a.href = url; a.download = `risultati_${cls}_${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-  };
-
-  const studentiClasse = studentiCache[cls] || [];
-
-  return (
-    <div className="flex-grow flex flex-col min-h-screen">
-      <div className="bg-[#34495e] text-white">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center"><Icon name="users" size={22}/></div>
-            <div className="leading-tight"><div className="font-extrabold text-lg">Cruscotto Docente</div><div className="text-xs text-white/60">Arte Bianca · prof. Becattini</div></div>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <select value={cls} onChange={e => setCls(e.target.value)} className="appearance-none bg-white/10 text-white font-bold rounded-xl pl-4 pr-9 py-2.5 outline-none cursor-pointer hover:bg-white/20">
-                {classi.length === 0 && <option value="" className="text-[#34495e]">Nessuna classe</option>}
-                {classi.map(c => <option key={c.classe} value={c.classe} className="text-[#34495e]">Classe {c.classe} ({c.studenti})</option>)}
-              </select>
-              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"><Icon name="chevron" size={16}/></span>
-            </div>
-            <button onClick={onExit} className="bg-white/10 hover:bg-white/20 rounded-xl px-3 py-2.5 font-bold flex items-center gap-1.5 text-sm"><Icon name="logout" size={16}/> Esci</button>
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-6xl mx-auto w-full px-4 py-5 flex-grow">
-        <div className="flex flex-wrap gap-2 mb-4">
-          <button onClick={() => fileClasse.current && fileClasse.current.click()} className="bg-[#34495e] text-white font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-[#2c3e50]">{busy === 'classe' ? <Spinner/> : <Icon name="upload" size={16}/>} Carica classe</button>
-          <input ref={fileClasse} type="file" accept="application/json,.json" onChange={onFileClasse} className="hidden"/>
-          <button onClick={caricaRisultati} className="bg-white border-2 border-[#34495e] text-[#34495e] font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-gray-50">{busy === 'risultati' ? <Spinner/> : <Icon name="refresh" size={16}/>} Aggiorna risultati</button>
-          <button onClick={esportaCSV} disabled={!risultati.length} className="bg-white border-2 border-[#34495e] text-[#34495e] font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-gray-50 disabled:opacity-40 ml-auto"><Icon name="download" size={16}/> Esporta CSV</button>
-        </div>
-
-        {msg && <div className={`mb-4 text-sm font-semibold rounded-xl px-4 py-2.5 ${msg.e ? 'bg-[#c0392b]/10 text-[#c0392b]' : 'bg-[#7fb088]/15 text-[#4c7a55]'}`}>{msg.t}</div>}
-
-        {quizCorrenti[cls] && <div className="mb-4 text-sm font-semibold rounded-xl px-4 py-2.5 bg-[#aed6f1]/30 text-[#34495e] flex items-center gap-2"><Icon name="doc" size={16}/> Verifica attiva per la {cls}: «{quizCorrenti[cls]}»</div>}
-        <div className="mb-4 text-sm font-semibold rounded-xl px-4 py-2.5 bg-[#aed6f1]/30 text-[#34495e] flex items-center gap-2"><Icon name="doc" size={16}/> Verifica del collaudo: «Marketing e Strategie Aziendali» (incorporata)</div>
-
-        {/* PIN della classe (da mostrare alla LIM) */}
-        {studentiClasse.length > 0 && (
-          <div className="bg-white rounded-2xl shadow-card overflow-hidden mb-5">
-            <div className="px-4 py-3 bg-gray-50 font-bold text-[#34495e] flex items-center justify-between">
-              <span>PIN classe {cls} — da comunicare agli studenti</span>
-              <span className="text-xs font-semibold text-[#756f63]">{studentiClasse.length} studenti</span>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px bg-gray-100">
-              {[...studentiClasse].sort((a,b)=>(a.cognome+a.nome).localeCompare(b.cognome+b.nome)).map(s => (
-                <div key={s.pin} className="bg-white px-4 py-2.5 flex items-center justify-between">
-                  <span className="font-semibold text-[#2e2e2e] text-sm">{s.cognome} {s.nome}</span>
-                  <span className="font-mono font-extrabold text-[#34495e] text-lg tracking-wider">{s.pin}</span>
+        /* =====================================================================
+           COMPONENTI GRAFICI PER LE DOMANDE
+        ===================================================================== */
+        const SingleChoice = ({ q, answer, onAnswer, locked, reveal, order }) => {
+            const display = (order && order.length === q.options.length) ? order : q.options.map((_, i) => i);
+            return (
+                <div className="space-y-3">
+                    {display.map((origIdx) => {
+                        const opt = q.options[origIdx];
+                        const isSelected = answer?.selection === origIdx;
+                        const isCorrect = origIdx === q.correctIndex;
+                        let style = "bg-white border border-gray-200 text-[#2e2e2e]";
+                        let icon = null;
+                        if (reveal) {
+                            if (isCorrect) { style = "bg-[#7fb088] text-white border-[#7fb088]"; icon = "check"; }
+                            else if (isSelected) { style = "bg-[#c0392b] text-white border-[#c0392b]"; icon = "x"; }
+                            else { style = "bg-gray-50 text-gray-400 border-transparent opacity-70"; }
+                        } else if (isSelected) {
+                            style = "bg-[#aed6f1] border-[#34495e] text-[#2e2e2e] shadow-md";
+                        }
+                        const interactive = !locked && !reveal;
+                        return (
+                            <div key={origIdx} onClick={() => interactive && onAnswer(q.id, origIdx)}
+                                className={`p-4 rounded-xl shadow-sm transition-all flex items-center justify-between ${style} ${interactive ? 'cursor-pointer hover:border-[#34495e] hover:shadow-md' : 'cursor-default'}`}>
+                                <div className="flex items-center w-full">
+                                    <div className={`w-5 h-5 rounded-full border-2 mr-4 flex items-center justify-center flex-shrink-0 ${(isSelected || (reveal && isCorrect)) ? 'border-white/60' : 'border-gray-300'}`}>
+                                        {(isSelected || (reveal && isCorrect)) && <div className={`w-2.5 h-2.5 rounded-full ${reveal ? 'bg-white' : 'bg-[#34495e]'}`}></div>}
+                                    </div>
+                                    <span className="font-medium text-sm md:text-base leading-snug">{opt}</span>
+                                </div>
+                                {icon && <Icon name={icon} size={20} className="text-white ml-2 flex-shrink-0"/>}
+                            </div>
+                        );
+                    })}
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
+            );
+        };
 
-        {/* Risultati */}
-        <div className="bg-white rounded-2xl shadow-card overflow-hidden">
-          <div className="px-4 py-3 bg-gray-50 font-bold text-[#34495e]">Consegne ricevute — classe {cls || '—'}</div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead><tr className="bg-gray-50 text-[#756f63] text-left">
-                <th className="px-4 py-3 font-bold">Orario</th><th className="px-4 py-3 font-bold">Studente</th>
-                <th className="px-4 py-3 font-bold">PIN</th><th className="px-4 py-3 font-bold">Stato</th>
-                <th className="px-4 py-3 font-bold text-center">Punti chiuse</th>
-              </tr></thead>
-              <tbody>
-                {risultati.length === 0 && <tr><td colSpan="5" className="px-4 py-8 text-center text-gray-400">Nessuna consegna ancora. Premi «Aggiorna risultati» durante e dopo la verifica.</td></tr>}
-                {risultati.map((r, i) => {
-                  const pc = r.risposte && r.risposte.punteggioChiuse != null ? r.risposte.punteggioChiuse : r.punteggio;
-                  return (
-                    <tr key={i} className="border-t border-gray-100">
-                      <td className="px-4 py-3 text-[#756f63] whitespace-nowrap">{new Date(r.timestamp).toLocaleTimeString('it-IT')}</td>
-                      <td className="px-4 py-3 font-semibold whitespace-nowrap">{r.cognome} {r.nome}</td>
-                      <td className="px-4 py-3 font-mono font-bold text-[#34495e]">{r.pin}</td>
-                      <td className="px-4 py-3"><span className="text-xs font-bold px-2.5 py-1 rounded-full bg-[#7fb088]/15 text-[#4c7a55]">{r.stato}</span></td>
-                      <td className="px-4 py-3 text-center font-extrabold text-[#34495e]">{pc != null ? pc : '—'}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-        <Firma/>
-      </div>
-    </div>
-  );
-};
-
-/* ====================================================================
-   STUDENTE — svolgimento verifica
-==================================================================== */
-const Studente = ({ studente, quiz, onFine }) => {
-  const domande = quiz.domande;
-  const [idx, setIdx] = useState(0);
-  // ordine opzioni mescolato per ogni domanda chiusa
-  const [ordini] = useState(() => {
-    const o = {};
-    domande.forEach((d, i) => { if (d.tipo === 'singola' || d.tipo === 'multipla') o[i] = shuffle(d.opzioni.map((_, k) => k)); });
-    return o;
-  });
-  const [risposte, setRisposte] = useState({});
-  const [conferma, setConferma] = useState(false);
-  const [stato, setStato] = useState('gioco'); // gioco | invio | fatto | errore
-
-  const setRisp = (val) => setRisposte(r => ({ ...r, [idx]: val }));
-  const risposta = (qid) => risposte[qid];
-  const rispDate = domande.filter((d, i) => {
-    const v = risposte[i];
-    if (d.tipo === 'multipla') return Array.isArray(v) && v.length > 0;
-    if (d.tipo === 'aperta') return typeof v === 'string' && v.trim().length > 0;
-    return v != null;
-  }).length;
-
-  const consegna = async () => {
-    setConferma(false); setStato('invio');
-    let punti = 0;
-    const rispOut = {};
-    domande.forEach((d, i) => { rispOut['d' + i] = risposte[i] != null ? risposte[i] : null; if (isChiusa(d)) punti += scoreDomanda(d, risposte[i]); });
-    const r = await api({
-      action: 'submit', pin: studente.pin, quizId: quiz.quizId, stato: 'consegnato',
-      punteggio: punti, risposte: { answers: rispOut, punteggioChiuse: punti, maxChiuse: domande.filter(isChiusa).reduce((a, d) => a + d.punti, 0) }
-    });
-    if (r.ok) setStato('fatto'); else setStato('errore');
-  };
-
-  if (stato === 'fatto') {
-    return (
-      <div className="flex-grow flex flex-col items-center justify-center p-6 text-center fade-in">
-        <div className="w-20 h-20 rounded-full bg-[#7fb088]/20 text-[#7fb088] flex items-center justify-center"><Icon name="check" size={44}/></div>
-        <h1 className="text-2xl font-extrabold text-[#34495e] mt-6">Verifica consegnata!</h1>
-        <p className="mt-3 text-[#756f63] max-w-xs font-medium">Le tue risposte sono state salvate correttamente. Puoi chiudere la pagina.</p>
-        <div className="mt-6 bg-gray-100 rounded-2xl px-5 py-3 font-bold text-[#34495e]">{studente.cognome} {studente.nome}</div>
-        <Firma/>
-      </div>
-    );
-  }
-  if (stato === 'errore') {
-    return (
-      <div className="flex-grow flex flex-col items-center justify-center p-6 text-center fade-in">
-        <div className="w-20 h-20 rounded-full bg-[#c0392b]/15 text-[#c0392b] flex items-center justify-center"><Icon name="x" size={44}/></div>
-        <h1 className="text-2xl font-extrabold text-[#c0392b] mt-6">Salvataggio non riuscito</h1>
-        <p className="mt-3 text-[#756f63] max-w-xs font-medium">Probabile problema di rete. Le tue risposte sono ancora qui: riprova a consegnare.</p>
-        <button onClick={consegna} className="mt-6 px-8 py-3 rounded-xl font-bold bg-[#34495e] text-white flex items-center gap-2"><Icon name="send" size={18}/> Riprova a consegnare</button>
-      </div>
-    );
-  }
-
-  const d = domande[idx];
-  const ordine = ordini[idx] || (d.opzioni ? d.opzioni.map((_, k) => k) : []);
-
-  return (
-    <div className="flex-grow flex flex-col min-h-screen">
-      {/* Header con NOME grande */}
-      <div className="sticky top-0 z-30 bg-[#34495e] text-white shadow-md">
-        <div className="max-w-2xl mx-auto px-4 py-2 flex items-center justify-between">
-          <div className="leading-none">
-            <div className="text-[10px] uppercase tracking-widest text-white/60">Classe {studente.classe}</div>
-            <div className="text-lg md:text-xl font-extrabold tracking-tight">{studente.cognome} {studente.nome}</div>
-          </div>
-          <div className="text-right"><div className="text-[10px] uppercase tracking-widest text-white/60">Risposte</div><div className="text-lg font-extrabold">{rispDate}/{domande.length}</div></div>
-        </div>
-      </div>
-
-      <div className="flex-grow w-full max-w-2xl mx-auto px-4 py-4 flex flex-col">
-        <div className="flex flex-wrap gap-1.5 justify-center mb-4">
-          {domande.map((q, i) => {
-            const v = risposte[i];
-            const done = q.tipo === 'multipla' ? (Array.isArray(v) && v.length > 0) : q.tipo === 'aperta' ? (typeof v === 'string' && v.trim()) : v != null;
-            return <button key={i} onClick={() => setIdx(i)} className={`w-3.5 h-3.5 rounded-full ${i === idx ? 'ring-2 ring-offset-1 ring-[#34495e] scale-110' : ''} ${done ? 'bg-[#34495e]' : 'bg-gray-300'}`}/>;
-          })}
-        </div>
-
-        <div className="bg-white rounded-2xl shadow-card p-6 flex-grow fade-in" key={idx}>
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda {idx + 1} di {domande.length}</span>
-            <span className="text-xs font-bold text-[#34495e] bg-gray-100 px-2 py-1 rounded">{d.punti} pt</span>
-          </div>
-          <p className="font-bold text-[#2e2e2e] text-lg mb-5 leading-relaxed">{d.testo}</p>
-
-          {d.tipo === 'singola' && (
-            <div className="space-y-3">
-              {ordine.map(oi => {
-                const sel = risposta(idx) === oi;
-                return <div key={oi} onClick={() => setRisp(oi)} className={`p-4 rounded-xl shadow-sm cursor-pointer flex items-center ${sel ? 'bg-[#aed6f1] border-2 border-[#34495e]' : 'bg-white border border-gray-200 hover:border-[#34495e]'}`}>
-                  <div className={`w-5 h-5 rounded-full border-2 mr-4 flex items-center justify-center flex-shrink-0 ${sel ? 'border-[#34495e]' : 'border-gray-300'}`}>{sel && <div className="w-2.5 h-2.5 rounded-full bg-[#34495e]"/>}</div>
-                  <span className="font-medium text-sm md:text-base leading-snug">{d.opzioni[oi]}</span></div>;
-              })}
-            </div>
-          )}
-
-          {d.tipo === 'multipla' && (
-            <div className="space-y-3">
-              <div className="text-xs text-[#756f63] font-bold uppercase tracking-wider">Puoi selezionare più risposte</div>
-              {ordine.map(oi => {
-                const cur = Array.isArray(risposta(idx)) ? risposta(idx) : [];
-                const sel = cur.includes(oi);
-                const toggle = () => setRisp(sel ? cur.filter(x => x !== oi) : [...cur, oi]);
-                return <div key={oi} onClick={toggle} className={`p-4 rounded-xl shadow-sm cursor-pointer flex items-center ${sel ? 'bg-[#aed6f1] border-2 border-[#34495e]' : 'bg-white border border-gray-200 hover:border-[#34495e]'}`}>
-                  <div className={`w-5 h-5 rounded border-2 mr-4 flex items-center justify-center flex-shrink-0 ${sel ? 'border-[#34495e] bg-[#34495e]' : 'border-gray-300'}`}>{sel && <Icon name="check" size={14} className="text-white"/>}</div>
-                  <span className="font-medium text-sm md:text-base leading-snug">{d.opzioni[oi]}</span></div>;
-              })}
-            </div>
-          )}
-
-          {d.tipo === 'vero_falso' && (
-            <div className="grid grid-cols-2 gap-3">
-              {[true, false].map(v => {
-                const sel = risposta(idx) === v;
-                return <div key={String(v)} onClick={() => setRisp(v)} className={`p-5 rounded-xl shadow-sm cursor-pointer text-center font-bold ${sel ? 'bg-[#aed6f1] border-2 border-[#34495e]' : 'bg-white border border-gray-200 hover:border-[#34495e]'}`}>{v ? 'VERO' : 'FALSO'}</div>;
-              })}
-            </div>
-          )}
-
-          {d.tipo === 'aperta' && (
+        const OpenAnswer = ({ value, onChange, locked }) => (
             <div>
-              <textarea value={risposta(idx) || ''} onChange={e => setRisp(e.target.value)} onPaste={e => e.preventDefault()} onDrop={e => e.preventDefault()} rows={7}
-                placeholder="Scrivi qui la tua risposta…" className="w-full p-4 rounded-xl border-2 border-gray-200 focus:border-[#34495e] outline-none resize-none text-sm md:text-base leading-relaxed"/>
-              <div className="text-xs text-[#756f63] mt-2">Per questa domanda incolla e trascinamento sono disattivati.</div>
+                <textarea value={value} disabled={locked} onChange={e => onChange(e.target.value)} onPaste={e => e.preventDefault()} onDrop={e => e.preventDefault()} rows={7} placeholder="Scrivi qui la tua risposta argomentata…"
+                    className="w-full p-4 rounded-xl border-2 border-gray-200 focus:border-[#34495e] outline-none resize-none text-sm md:text-base leading-relaxed disabled:bg-gray-50" />
+                <div className="text-xs text-[#756f63] mt-2 flex items-center gap-1">
+                    <Icon name="alert" size={13}/> Per questa domanda incolla e trascinamento sono disattivati.
+                </div>
             </div>
-          )}
-        </div>
+        );
 
-        <div className="grid grid-cols-2 gap-3 mt-4">
-          <button disabled={idx === 0} onClick={() => setIdx(i => Math.max(0, i - 1))} className="py-3.5 rounded-xl font-bold border-2 border-[#34495e] text-[#34495e] disabled:opacity-30 disabled:border-gray-200 disabled:text-gray-300 flex items-center justify-center gap-1"><Icon name="prev" size={18}/> Indietro</button>
-          {idx < domande.length - 1
-            ? <button onClick={() => setIdx(i => Math.min(domande.length - 1, i + 1))} className="py-3.5 rounded-xl font-bold bg-[#34495e] text-white hover:bg-[#2c3e50] flex items-center justify-center gap-1">Avanti <Icon name="next" size={18}/></button>
-            : <button onClick={() => setConferma(true)} className="py-3.5 rounded-xl font-bold bg-[#7fb088] text-white hover:brightness-95 flex items-center justify-center gap-2"><Icon name="send" size={18}/> Consegna</button>}
-        </div>
-        <Firma/>
-      </div>
-
-      {conferma && (
-        <Modal onClose={() => setConferma(false)}>
-          <div className="text-center">
-            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-[#7fb088]/15 text-[#7fb088] mb-3"><Icon name="send" size={26}/></div>
-            <h3 className="text-xl font-extrabold text-[#34495e]">Consegnare la verifica?</h3>
-            <p className="text-sm text-[#756f63] mt-2 mb-5">Hai risposto a <b>{rispDate}</b> domande su <b>{domande.length}</b>. Dopo la consegna non potrai più modificare.</p>
-            <div className="grid grid-cols-2 gap-3">
-              <button onClick={() => setConferma(false)} className="py-3 rounded-xl font-bold border-2 border-[#34495e] text-[#34495e]">Torna al test</button>
-              <button onClick={consegna} className="py-3 rounded-xl font-bold bg-[#7fb088] text-white">Consegna</button>
+        /* =====================================================================
+           SCHERMATA INIZIALE (LANDING)
+        ===================================================================== */
+        const Modal = ({ children, onClose, maxW = "max-w-md" }) => (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm fade-in no-print" onClick={onClose}>
+                <div className={`w-full ${maxW} bg-white rounded-3xl shadow-lg p-7 bounce-in`} onClick={e => e.stopPropagation()}>
+                    {children}
+                </div>
             </div>
-          </div>
-        </Modal>
-      )}
+        );
 
-      {stato === 'invio' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl p-8 text-center shadow-card">
-            <div className="text-[#34495e] flex justify-center mb-3"><Spinner size={40}/></div>
-            <div className="font-bold text-[#34495e]">Sto salvando la tua verifica…</div>
-            <div className="text-sm text-[#756f63] mt-1">Non chiudere la pagina.</div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
+        const Landing = ({ onStudent, onAdmin }) => {
+            const [pin, setPin] = useState("");
+            const [err, setErr] = useState("");
+            const [adminPwOpen, setAdminPwOpen] = useState(false);
+            const [pw, setPw] = useState("");
+            const [pwErr, setPwErr] = useState(false);
 
-/* ====================================================================
-   ROOT
-==================================================================== */
-const App = () => {
-  const [view, setView] = useState('home');
-  const [studente, setStudente] = useState(null);
-  const [quiz, setQuiz] = useState(null);
+            const submitPin = () => {
+                const clean = pin.trim().toLowerCase();
+                if (clean === "admin") { setAdminPwOpen(true); return; }
+                if (!/^\d{5}$/.test(pin.trim())) { setErr("Il PIN deve essere di 5 cifre."); return; }
+                onStudent(pin.trim(), (res) => { if (!res.ok) setErr(res.msg); });
+            };
 
-  const onStudente = async (pin) => {
-    const r = await api({ action: 'checkPin', pin });
-    if (!r.ok) {
-      if (r.error === 'PIN_NON_VALIDO') return { error: 'PIN non riconosciuto.' };
-      if (r.error === 'RETE') return { error: 'Connessione assente. Controlla la rete e riprova.' };
-      return { error: 'Accesso non riuscito. Riprova.' };
+            const submitPw = () => {
+                if (pw === ADMIN_PASSWORD) { onAdmin(); }
+                else { setPwErr(true); setPw(""); }
+            };
+
+            return (
+                <div className="flex-grow flex flex-col items-center justify-center p-5 fade-in">
+                    <div className="w-full max-w-sm bg-white rounded-[2rem] shadow-card border border-gray-100 p-8 text-center">
+                        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[#34495e] text-white mb-4">
+                            <Icon name="key" size={30} />
+                        </div>
+                        <h1 className="text-2xl font-extrabold text-[#34495e] leading-tight">Accesso alla Verifica</h1>
+                        <p className="text-sm text-[#756f63] mt-2 mb-6">Inserisci il PIN personale a 5 cifre.</p>
+
+                        <input inputMode="numeric" maxLength={5} value={pin} onChange={e => { setPin(e.target.value.replace(/[^0-9a-zA-Z]/g, '')); setErr(""); }} onKeyDown={e => e.key === 'Enter' && submitPin()} placeholder="• • • • •"
+                            className="w-full text-center text-3xl font-extrabold tracking-[0.4em] py-4 rounded-2xl border-2 border-gray-200 focus:border-[#34495e] outline-none transition-colors text-[#34495e]" />
+                        {err && <div className="text-[#c0392b] text-sm font-semibold mt-3">{err}</div>}
+
+                        <button onClick={submitPin} className="w-full mt-5 py-4 rounded-2xl font-bold bg-[#34495e] text-white shadow-lg hover:bg-[#2c3e50] transition-colors scale-hover flex items-center justify-center gap-2">
+                            Entra <Icon name="next" size={18} />
+                        </button>
+                        <button onClick={() => setAdminPwOpen(true)} className="mt-5 text-xs font-semibold text-gray-400 hover:text-[#34495e] inline-flex items-center gap-1"><Icon name="shield" size={14} /> Accesso docente</button>
+                    </div>
+                    <Signature />
+
+                    {adminPwOpen && (
+                        <Modal onClose={() => { setAdminPwOpen(false); setPw(""); setPwErr(false); }}>
+                            <div className="text-center">
+                                <h3 className="text-xl font-extrabold text-[#34495e]">Area Docente</h3>
+                                <p className="text-sm text-[#756f63] mt-1 mb-5">Inserisci la password di accesso.</p>
+                                <input type="password" value={pw} autoFocus onChange={e => { setPw(e.target.value); setPwErr(false); }} onKeyDown={e => e.key === 'Enter' && submitPw()} placeholder="Password"
+                                    className="w-full text-center text-lg font-semibold py-3 rounded-xl border-2 border-gray-200 focus:border-[#34495e] outline-none" />
+                                {pwErr && <div className="text-[#c0392b] text-sm font-semibold mt-3">Password errata.</div>}
+                                <div className="grid grid-cols-2 gap-3 mt-5">
+                                    <button onClick={() => { setAdminPwOpen(false); setPw(""); setPwErr(false); }} className="py-3 rounded-xl font-bold border-2 border-gray-200 text-[#34495e] hover:bg-gray-50">Annulla</button>
+                                    <button onClick={submitPw} className="py-3 rounded-xl font-bold bg-[#34495e] text-white hover:bg-[#2c3e50]">Accedi</button>
+                                </div>
+                            </div>
+                        </Modal>
+                    )}
+                </div>
+            );
+        };
+
+        /* =====================================================================
+           VISUALIZZAZIONE E REVISIONE DELLA PROVA COMPLETA
+        ===================================================================== */
+        const ReviewExam = ({ student, cls, reveal, questions, maxClosed, maxOpen, maxTotal }) => {
+            const closed = student.closedScore != null ? student.closedScore : computeClosedScore(student, questions);
+            const open = student.openScore != null ? student.openScore : 0;
+            const total = closed + open;
+            const percent = Math.round((total / maxTotal) * 100);
+            const passed = percent >= SOGLIA_SUFFICIENZA;
+            const answeredCount = questions.filter(q => student.answers[q.id]).length + (student.openAnswer ? 1 : 0);
+            const closedQuestions = questions.filter(q => q.type === 'single');
+            const openQuestion = questions.find(q => q.type === 'open');
+
+            return (
+                <div>
+                    <div className="flex items-center justify-between mb-4">
+                        <div>
+                            <div className="text-xs font-bold text-gray-400 uppercase tracking-widest">Classe {cls} · PIN {student.pin}</div>
+                            <h3 className="text-xl font-extrabold text-[#34495e]">{student.lastName} {student.firstName}</h3>
+                        </div>
+                        {reveal ? (
+                            <div className="text-right">
+                                <div className={`text-3xl font-extrabold tracking-tight ${passed ? 'text-[#7fb088]' : 'text-[#c0392b]'}`}>{percent}%</div>
+                                <div className="text-xs font-semibold text-[#756f63]">{total}/{maxTotal} · {(total/maxTotal*10).toFixed(1)}/10</div>
+                            </div>
+                        ) : (
+                            <div className="text-right">
+                                <div className="text-2xl font-extrabold text-[#34495e]">{answeredCount}/{questions.length}</div>
+                                <div className="text-xs font-semibold text-[#756f63]">risposte date</div>
+                            </div>
+                        )}
+                    </div>
+
+                    {reveal && (
+                        <div className="flex gap-2 mb-4 text-xs font-semibold">
+                            <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Chiuse: {closed}/{maxClosed}</span>
+                            <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Aperta: {open}/{maxOpen}</span>
+                        </div>
+                    )}
+
+                    <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+                        {closedQuestions.map((q, i) => {
+                            const a = student.answers[q.id];
+                            const answered = a && a.selection != null;
+                            const ok = answered && a.selection === q.correctIndex;
+                            const border = !reveal ? (answered ? "border-[#34495e]" : "border-gray-300") : (answered ? (ok ? "border-[#7fb088]" : "border-[#c0392b]") : "border-gray-300");
+                            return (
+                                <div key={q.id} className={`bg-white p-5 rounded-2xl shadow-sm border-l-8 ${border}`}>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda {i+1}</span>
+                                        <span className={`text-xs font-bold px-2 py-1 rounded ${reveal ? (answered ? (ok ? 'bg-[#7fb088]/10 text-[#7fb088]' : 'bg-[#c0392b]/10 text-[#c0392b]') : 'bg-gray-200 text-gray-600') : (answered ? 'bg-[#aed6f1]/40 text-[#34495e]' : 'bg-gray-200 text-gray-600')}`}>{reveal ? (answered ? (ok ? 'CORRETTA' : 'ERRATA') : 'NON RISPOSTA') : (answered ? 'RISPOSTA' : 'IN BIANCO')}</span>
+                                    </div>
+                                    <p className="font-bold text-[#2e2e2e] mb-3 leading-relaxed text-sm md:text-base">{q.question}</p>
+                                    <SingleChoice q={q} answer={a} onAnswer={()=>{}} locked reveal={reveal} />
+                                    {reveal && q.explanation && (
+                                        <div className="mt-4 pt-3 border-t border-gray-100">
+                                            <div className="text-xs font-bold text-[#34495e] uppercase mb-1">Spiegazione</div>
+                                            <p className="text-sm text-[#756f63] leading-relaxed">{q.explanation}</p>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+
+                        {openQuestion && (
+                            <div className="bg-white p-5 rounded-2xl shadow-sm border-l-8 border-[#34495e]">
+                                <div className="flex justify-between items-center mb-2">
+                                    <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda aperta</span>
+                                    {reveal && <span className="text-xs font-bold px-2 py-1 rounded bg-gray-100 text-[#34495e]">{open}/{maxOpen} pt</span>}
+                                </div>
+                                <p className="font-bold text-[#2e2e2e] mb-3 leading-relaxed text-sm md:text-base">{openQuestion.question}</p>
+                                <div className="bg-gray-50 rounded-xl p-4 text-sm text-[#2e2e2e] whitespace-pre-wrap leading-relaxed">{student.openAnswer || <span className="italic text-gray-400">Nessuna risposta fornita.</span>}</div>
+                                {reveal && student.openComment && (
+                                    <div className="bg-[#aed6f1]/20 rounded-xl p-4 text-sm mt-3">
+                                        <div className="text-xs font-bold text-[#34495e] uppercase mb-1">Commento del docente</div>
+                                        <div className="text-[#2e2e2e] leading-relaxed">{student.openComment}</div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        /* =====================================================================
+           INTERFACCIA STUDENTE APPLICAZIONE
+        ===================================================================== */
+        const StudentApp = ({ pin, cls, db, onSyncUpdate, maxClosed, maxOpen, maxTotal }) => {
+            const student = db.classes[cls]?.students[pin];
+            const questions = db.questions || [];
+            const [idx, setIdx] = useState(0);
+            const [confirmOpen, setConfirmOpen] = useState(false);
+
+            const answer = (qid, selection) => {
+                if (student.status !== 'playing') return;
+                const updatedStudent = { ...student };
+                updatedStudent.answers = { ...updatedStudent.answers, [qid]: { selection, isLocked: true } };
+                onSyncUpdate(cls, pin, updatedStudent);
+            };
+            
+            const setOpen = (text) => {
+                if (student.status !== 'playing') return;
+                const updatedStudent = { ...student, openAnswer: text };
+                onSyncUpdate(cls, pin, updatedStudent);
+            };
+            
+            const consegna = () => {
+                const updatedStudent = { ...student };
+                updatedStudent.status = 'submitted';
+                updatedStudent.submittedAt = Date.now();
+                updatedStudent.closedScore = computeClosedScore(updatedStudent, questions);
+                setConfirmOpen(false);
+                onSyncUpdate(cls, pin, updatedStudent);
+            };
+
+            if (!student || questions.length === 0) {
+                return (
+                    <div className="flex-grow flex flex-col items-center justify-center p-6 text-center">
+                        <div className="text-xl font-bold text-[#34495e]">Caricamento o nessuna prova attiva...</div>
+                    </div>
+                );
+            }
+
+            if (student.status === 'locked') {
+                return (
+                    <div className="flex-grow flex flex-col items-center justify-center p-6 bg-[#c0392b] text-white text-center fade-in min-h-screen">
+                        <div className="pulse-red"><Icon name="lock" size={70} /></div>
+                        <h1 className="text-3xl font-extrabold mt-6">Sei disconnesso</h1>
+                        <p className="mt-3 text-white/90 max-w-xs font-medium">La prova è stata sospesa. Contatta il docente per essere riammesso.</p>
+                        <div className="mt-6 bg-white/15 rounded-2xl px-5 py-3 font-bold tracking-wide">{student.lastName} {student.firstName}</div>
+                    </div>
+                );
+            }
+
+            if (student.status === 'submitted') {
+                return (
+                    <div className="flex-grow flex flex-col items-center justify-center p-6 text-center fade-in">
+                        <div className="w-20 h-20 rounded-full bg-[#f7dd73]/25 text-[#7a6310] flex items-center justify-center"><Icon name="clock" size={42}/></div>
+                        <h1 className="text-2xl font-extrabold text-[#34495e] mt-6">Verifica consegnata</h1>
+                        <p className="mt-3 text-[#756f63] max-w-xs font-medium">La tua prova è stata inviata con successo. Attendi la pubblicazione degli esiti.</p>
+                        <div className="mt-6 bg-gray-100 rounded-2xl px-5 py-3 font-bold text-[#34495e]">{student.lastName} {student.firstName}</div>
+                        <Signature />
+                    </div>
+                );
+            }
+
+            if (student.status === 'published') {
+                return (
+                    <div className="flex-grow flex flex-col items-center p-4 pt-6 fade-in">
+                        <div className="w-full max-w-2xl">
+                            <ReviewExam student={student} cls={cls} reveal={true} questions={questions} maxClosed={maxClosed} maxOpen={maxOpen} maxTotal={maxTotal} />
+                            <Signature />
+                        </div>
+                    </div>
+                );
+            }
+
+            const q = questions[idx];
+            const ans = student.answers[q.id];
+            const answeredCount = questions.filter(cq => cq.type === 'open' ? !!student.openAnswer : !!student.answers[cq.id]).length;
+
+            return (
+                <div className="flex-grow flex flex-col min-h-screen">
+                    <div className="sticky top-0 z-30 bg-[#34495e] text-white shadow-md">
+                        <div className="max-w-2xl mx-auto px-4 py-2 flex items-center justify-between">
+                            <div className="leading-none">
+                                <div className="text-[10px] uppercase tracking-widest text-white/60">Classe {cls}</div>
+                                <div className="text-lg md:text-xl font-extrabold tracking-tight">{student.lastName} {student.firstName}</div>
+                            </div>
+                            <div className="text-right">
+                                <div className="text-[10px] uppercase tracking-widest text-white/60">Risposte</div>
+                                <div className="text-lg font-extrabold">{answeredCount}/{questions.length}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="flex-grow w-full max-w-2xl mx-auto px-4 py-4 flex flex-col">
+                        <div className="flex flex-wrap gap-1.5 justify-center mb-4">
+                            {questions.map((qq, i) => (
+                                <button key={qq.id} onClick={() => setIdx(i)}
+                                    className={`w-3 h-3 rounded-full transition-all ${i === idx ? 'ring-2 ring-offset-1 ring-[#34495e] scale-125' : ''} ${(qq.type === 'open' ? !!student.openAnswer : !!student.answers[qq.id]) ? 'bg-[#34495e]' : 'bg-gray-300'}`} />
+                            ))}
+                        </div>
+
+                        <div className="bg-white rounded-2xl shadow-card border border-gray-100 p-6 flex-grow fade-in" key={q.id}>
+                            <div className="flex items-center justify-between mb-3">
+                                <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda {idx+1} di {questions.length}</span>
+                                <span className="text-xs font-bold text-[#34495e] bg-gray-100 px-2 py-1 rounded">{q.points} pt</span>
+                            </div>
+                            <p className="font-bold text-[#2e2e2e] text-lg mb-5 leading-relaxed">{q.question}</p>
+                            {q.type === 'single' ? <SingleChoice q={q} answer={ans} onAnswer={answer} order={student.optionOrder?.[q.id]} /> : <OpenAnswer value={student.openAnswer} onChange={setOpen} />}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 mt-4">
+                            <button disabled={idx === 0} onClick={() => setIdx(i => Math.max(0, i-1))} className="py-3.5 rounded-xl font-bold border-2 border-[#34495e] text-[#34495e] disabled:opacity-30 disabled:border-gray-200 disabled:text-gray-300 flex items-center justify-center gap-1"><Icon name="prev" size={18}/> Indietro</button>
+                            {idx < questions.length - 1 ? <button onClick={() => setIdx(i => Math.min(questions.length-1, i+1))} className="py-3.5 rounded-xl font-bold bg-[#34495e] text-white hover:bg-[#2c3e50] flex items-center justify-center gap-1">Avanti <Icon name="next" size={18}/></button> : <button onClick={() => setConfirmOpen(true)} className="py-3.5 rounded-xl font-bold bg-[#7fb088] text-white hover:brightness-95 flex items-center justify-center gap-2"><Icon name="send" size={18}/> Consegna</button>}
+                        </div>
+                        <Signature />
+                    </div>
+
+                    {confirmOpen && (
+                        <Modal onClose={() => setConfirmOpen(false)}>
+                            <div className="text-center">
+                                <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-[#7fb088]/15 text-[#7fb088] mb-3"><Icon name="send" size={26}/></div>
+                                <h3 className="text-xl font-extrabold text-[#34495e]">Consegnare la verifica?</h3>
+                                <p className="text-sm text-[#756f63] mt-2 mb-1">Hai risposto a <b>{answeredCount}</b> domande su <b>{questions.length}</b>.</p>
+                                <p className="text-sm text-[#756f63] mb-5">Dopo l'invio non potrai più cambiare le risposte.</p>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button onClick={() => setConfirmOpen(false)} className="py-3 rounded-xl font-bold border-2 border-[#34495e] text-[#34495e] hover:bg-gray-50">Annulla</button>
+                                    <button onClick={consegna} className="py-3 rounded-xl font-bold bg-[#7fb088] text-white hover:brightness-95">Consegna</button>
+                                </div>
+                            </div>
+                        </Modal>
+                    )}
+                </div>
+            );
+        };
+
+        /* =====================================================================
+           CRUSCOTTO DEL DOCENTE (ADMIN PANEL)
+        ===================================================================== */
+        const AdminApp = ({ db, onSyncUpdate, onResetDB, onExit, maxClosed, maxOpen, maxTotal }) => {
+            const classesList = Object.keys(db.classes || {});
+            const [cls, setCls] = useState(classesList[0] || "");
+            const [grading, setGrading] = useState(null);   
+            const [viewPin, setViewPin] = useState(null);    
+            const [reopenPin, setReopenPin] = useState(null);
+            const [reopenPw, setReopenPw] = useState("");
+            const [reopenErr, setReopenErr] = useState(false);
+            const [resetOpen, setResetOpen] = useState(false);
+            const [resetText, setResetText] = useState("");
+            const [pubOpen, setPubOpen] = useState(false);
+            const [printingCls, setPrintingCls] = useState(null);
+            
+            const classInputRef = useRef(null);
+            const testInputRef = useRef(null);
+
+            useEffect(() => { if (!cls && classesList.length > 0) setCls(classesList[0]); }, [classesList, cls]);
+
+            const classData = db.classes[cls];
+            const students = classData ? Object.values(classData.students).sort((a,b) => (a.lastName+a.firstName).localeCompare(b.lastName+b.firstName)) : [];
+            const questions = db.questions || [];
+
+            const handleUploadClasse = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                    try {
+                        const parsed = JSON.parse(reader.result);
+                        if (!parsed.classe || !parsed.alunni) throw new Error("JSON classe non valido");
+                        const newStudents = {};
+                        parsed.alunni.forEach(al => {
+                            newStudents[al.pin] = {
+                                pin: String(al.pin), firstName: al.nome, lastName: al.cognome,
+                                status: 'idle', answers: {}, openAnswer: '', openScore: null,
+                                openComment: '', closedScore: null, graded: false, startedAt: null, submittedAt: null
+                            };
+                        });
+                        const updatedClasses = { ...db.classes, [parsed.classe]: { published: false, students: newStudents } };
+                        onSyncUpdate(null, null, null, updatedClasses, db.questions);
+                        setCls(parsed.classe);
+                        alert(`Classe ${parsed.classe} caricata correttamente!`);
+                    } catch (err) { alert("Errore nel file JSON della classe."); }
+                };
+                reader.readAsText(file);
+                e.target.value = "";
+            };
+
+            const handleUploadProva = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                    try {
+                        const parsed = JSON.parse(reader.result);
+                        if (!Array.isArray(parsed)) throw new Error("Array atteso.");
+                        onSyncUpdate(null, null, null, db.classes, parsed);
+                        alert("Quesiti d'esame caricati e pronti via cloud!");
+                    } catch (err) { alert("Errore nel file JSON dei quesiti."); }
+                };
+                reader.readAsText(file);
+                e.target.value = "";
+            };
+
+            const sblocca = (pin) => {
+                const st = { ...classData.students[pin], status: 'playing' };
+                onSyncUpdate(cls, pin, st);
+            };
+
+            const blocca = (pin) => {
+                const st = { ...classData.students[pin], status: 'locked' };
+                onSyncUpdate(cls, pin, st);
+            };
+
+            const saveGrade = (pin, score, comment) => {
+                const st = { ...classData.students[pin], openScore: score, openComment: comment, graded: true };
+                if (st.closedScore == null) st.closedScore = computeClosedScore(st, questions);
+                onSyncUpdate(cls, pin, st);
+                setGrading(null);
+            };
+
+            const requestGrade = (s) => {
+                if (s.graded) { setReopenPin(s.pin); setReopenPw(""); setReopenErr(false); }
+                else setGrading(s.pin);
+            };
+            
+            const confirmReopen = () => {
+                if (reopenPw === ADMIN_PASSWORD) { setGrading(reopenPin); setReopenPin(null); setReopenPw(""); }
+                else { setReopenErr(true); setReopenPw(""); }
+            };
+
+            const pubblica = () => {
+                const updatedStudents = { ...classData.students };
+                Object.keys(updatedStudents).forEach(p => {
+                    if (updatedStudents[p].status === 'submitted' || updatedStudents[p].status === 'published') {
+                        if (updatedStudents[p].closedScore == null) updatedStudents[p].closedScore = computeClosedScore(updatedStudents[p], questions);
+                        updatedStudents[p].status = 'published';
+                    }
+                });
+                const updatedClasses = { ...db.classes, [cls]: { published: true, students: updatedStudents } };
+                onSyncUpdate(null, null, null, updatedClasses, db.questions);
+                setPubOpen(false);
+            };
+
+            const exportPDF = () => { setPrintingCls(cls); };
+
+            const exportArchive = () => {
+                const html = buildArchiveHTML(cls, classData, questions, maxClosed, maxOpen, maxTotal);
+                const blob = new Blob([html], { type: 'text/html' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a'); a.href = url; a.download = `archivio_${cls}.html`;
+                document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            };
+
+            const doReset = () => {
+                onResetDB();
+                setResetOpen(false);
+                setResetText("");
+                alert("Database cloud azzerato complessivamente!");
+            };
+            
+            useEffect(() => {
+                if (printingCls) {
+                    const t = setTimeout(() => { window.print(); setPrintingCls(null); }, 300);
+                    return () => clearTimeout(t);
+                }
+            }, [printingCls]);
+
+            const gradingStudent = grading ? classData?.students[grading] : null;
+            const counts = students.reduce((acc, s) => { acc[s.status] = (acc[s.status]||0)+1; return acc; }, {});
+
+            return (
+                <div className="flex-grow flex flex-col min-h-screen no-print">
+                    <div className="bg-[#34495e] text-white">
+                        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between flex-wrap gap-3">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center"><Icon name="shield" size={22}/></div>
+                                <div className="leading-tight">
+                                    <div className="font-extrabold text-lg">Cruscotto Docente Cloud</div>
+                                    <div className="text-xs text-white/60">Amministrazione centralizzata esami</div>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                {classesList.length > 0 && (
+                                    <div className="relative">
+                                        <select value={cls} onChange={e => setCls(e.target.value)} className="appearance-none bg-white/10 text-white font-bold rounded-xl pl-4 pr-9 py-2.5 outline-none cursor-pointer hover:bg-white/20">
+                                            {classesList.map(c => <option key={c} value={c} className="text-[#34495e]">Classe {c}</option>)}
+                                        </select>
+                                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"><Icon name="chevron" size={16}/></span>
+                                    </div>
+                                )}
+                                <button onClick={onExit} className="bg-white/10 hover:bg-white/20 rounded-xl px-3 py-2.5 font-bold flex items-center gap-1.5 text-sm"><Icon name="logout" size={16}/> Esci</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="max-w-6xl mx-auto w-full px-4 py-5 flex-grow">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                                <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Caricamento Setup Primario</h4>
+                                <div className="flex gap-2">
+                                    <input type="file" accept=".json" ref={classInputRef} onChange={handleUploadClasse} className="hidden" />
+                                    <button onClick={() => classInputRef.current.click()} className="flex-1 py-3 border-2 border-[#34495e] text-[#34495e] font-bold rounded-xl text-xs flex items-center justify-center gap-2 hover:bg-gray-50"><Icon name="users" size={16}/> Carica Alunni (JSON)</button>
+                                    
+                                    <input type="file" accept=".json" ref={testInputRef} onChange={handleUploadProva} className="hidden" />
+                                    <button onClick={() => testInputRef.current.click()} className="flex-1 py-3 bg-[#34495e] text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 hover:bg-[#2c3e50]"><Icon name="upload" size={16}/> Carica Quesiti (JSON)</button>
+                                </div>
+                            </div>
+                            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-around">
+                                <div className="text-center"><div className="text-2xl font-extrabold text-[#34495e]">{classesList.length}</div><div className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Classi</div></div>
+                                <div className="text-center"><div className="text-2xl font-extrabold text-[#34495e]">{questions.length}</div><div className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Quesiti caricati</div></div>
+                            </div>
+                        </div>
+
+                        {classesList.length > 0 && (
+                            <div className="fade-in">
+                                <div className="flex flex-wrap gap-2 mb-4">
+                                    <button onClick={() => setPubOpen(true)} className="bg-[#7fb088] text-white font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:brightness-95 scale-hover"><Icon name="eye" size={16}/> Pubblica voti</button>
+                                    <button onClick={exportPDF} className="bg-[#34495e] text-white font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-[#2c3e50] scale-hover"><Icon name="print" size={16}/> Esporta PDF</button>
+                                    <button onClick={exportArchive} className="bg-[#34495e] text-white font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-[#2c3e50] scale-hover"><Icon name="archive" size={16}/> Esporta Archivio HTML</button>
+                                    <button onClick={() => setResetOpen(true)} className="bg-white border-2 border-[#c0392b] text-[#c0392b] font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-[#c0392b]/5 scale-hover ml-auto"><Icon name="trash" size={16}/> Reset Cloud Completo</button>
+                                </div>
+
+                                <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4">
+                                    {[['idle','Non iniziati'],['playing','In corso'],['locked','Bloccati'],['submitted','Consegnati'],['published','Pubblicati']].map(([k,label]) => (
+                                        <div key={k} className="bg-white rounded-xl shadow-card border border-gray-100 px-3 py-2.5 text-center">
+                                            <div className="text-2xl font-extrabold text-[#34495e]">{counts[k]||0}</div>
+                                            <div className="text-[11px] font-semibold text-[#756f63] uppercase tracking-wide">{label}</div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {classData?.published && <div className="mb-3 bg-[#7fb088]/10 text-[#4c7a55] text-sm font-semibold rounded-xl px-4 py-2.5 flex items-center gap-2"><Icon name="check" size={16}/> Risultati pubblicati online per la classe {cls}.</div>}
+
+                                <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden">
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-sm">
+                                            <thead>
+                                                <tr className="bg-gray-50 text-[#756f63] text-left">
+                                                    <th className="px-4 py-3 font-bold">PIN</th>
+                                                    <th className="px-4 py-3 font-bold">Studente</th>
+                                                    <th className="px-4 py-3 font-bold">Stato</th>
+                                                    <th className="px-4 py-3 font-bold text-center">Chiuse</th>
+                                                    <th className="px-4 py-3 font-bold text-center">Aperta</th>
+                                                    <th className="px-4 py-3 font-bold text-center">Totale</th>
+                                                    <th className="px-4 py-3 font-bold text-right">Azioni</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {students.map(s => {
+                                                    const submitted = s.status === 'submitted' || s.status === 'published';
+                                                    const playing = s.status === 'playing';
+                                                    const answeredCount = questions.filter(q => s.answers[q.id]).length + (s.openAnswer ? 1 : 0);
+                                                    const closed = s.closedScore != null ? s.closedScore : (submitted ? computeClosedScore(s, questions) : null);
+                                                    const tot = submitted ? (closed + (s.openScore||0)) : null;
+                                                    return (
+                                                        <tr key={s.pin} className="border-t border-gray-100 hover:bg-gray-50/60">
+                                                            <td className="px-4 py-3 font-mono font-bold text-[#34495e]">{s.pin}</td>
+                                                            <td className="px-4 py-3 font-semibold text-[#2e2e2e] whitespace-nowrap">{s.lastName} {s.firstName}</td>
+                                                            <td className="px-4 py-3">
+                                                                <div className="flex items-center gap-2">
+                                                                    <StatusBadge status={s.status}/>
+                                                                    {playing && <span className="text-xs font-bold text-[#34495e]">{answeredCount}/{questions.length}</span>}
+                                                                </div>
+                                                            </td>
+                                                            <td className="px-4 py-3 text-center font-semibold text-[#34495e]">{closed != null ? `${closed}/${maxClosed}` : '—'}</td>
+                                                            <td className="px-4 py-3 text-center font-semibold">{submitted ? (s.openScore != null ? `${s.openScore}/${maxOpen}` : <span className="text-[#c0392b]">da valutare</span>) : '—'}</td>
+                                                            <td className="px-4 py-3 text-center">{tot != null ? <span className="inline-flex items-center gap-1 font-extrabold text-[#34495e]">{tot}/{maxTotal}{s.graded && <Icon name="lock" size={12} className="text-[#7fb088]" />}</span> : <span className="text-gray-400">—</span>}</td>
+                                                            <td className="px-4 py-3">
+                                                                <div className="flex justify-end gap-1.5 flex-wrap">
+                                                                    {s.status === 'locked' && <button onClick={() => sblocca(s.pin)} className="bg-[#aed6f1]/30 text-[#34495e] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-[#aed6f1]/60"><Icon name="unlock" size={14}/> Riammetti</button>}
+                                                                    {playing && <button onClick={() => blocca(s.pin)} className="bg-[#c0392b]/10 text-[#c0392b] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-[#c0392b]/20"><Icon name="lock" size={14}/> Sospendi</button>}
+                                                                    {(submitted || playing) && <button onClick={() => setViewPin(s.pin)} className="bg-gray-100 text-[#34495e] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-gray-200"><Icon name="eye" size={14}/> Sfoglia</button>}
+                                                                    {submitted && <button onClick={() => requestGrade(s)} className={`rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 ${s.graded ? 'bg-[#7fb088]/15 text-[#4c7a55] hover:bg-[#7fb088]/30' : 'bg-[#f7dd73]/30 text-[#7a6310] hover:bg-[#f7dd73]/60'}`}><Icon name={s.graded ? 'lock' : 'edit'} size={14}/> {s.graded ? 'Rivaluta' : 'Valuta'}</button>}
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {gradingStudent && (
+                        <Modal onClose={() => setGrading(null)} maxW="max-w-2xl">
+                            <GradingForm student={gradingStudent} questions={questions} maxOpen={maxOpen} onSave={saveGrade} onClose={() => setGrading(null)} />
+                        </Modal>
+                    )}
+
+                    {viewPin && classData?.students[viewPin] && (
+                        <Modal onClose={() => setViewPin(null)} maxW="max-w-2xl">
+                            <div className="flex justify-end -mt-2 -mr-2 mb-1"><button onClick={() => setViewPin(null)} className="text-gray-400 hover:text-[#34495e]"><Icon name="x" size={22}/></button></div>
+                            <ReviewExam student={classData.students[viewPin]} cls={cls} reveal={classData.students[viewPin].status === 'submitted' || classData.students[viewPin].status === 'published'} questions={questions} maxClosed={maxClosed} maxOpen={maxOpen} maxTotal={maxTotal} />
+                        </Modal>
+                    )}
+
+                    {reopenPin && (
+                        <Modal onClose={() => { setReopenPin(null); setReopenPw(""); setReopenErr(false); }}>
+                            <div className="text-center">
+                                <h3 className="text-xl font-extrabold text-[#34495e]">Modifica Valutazione</h3>
+                                <p className="text-sm text-[#756f63] mt-2 mb-4">Questa correzione è registrata. Inserisci la password per abilitare la modifica.</p>
+                                <input type="password" value={reopenPw} autoFocus onChange={e => { setReopenPw(e.target.value); setReopenErr(false); }} onKeyDown={e => e.key === 'Enter' && confirmReopen()} placeholder="Password" className="w-full text-center text-lg font-semibold py-3 rounded-xl border-2 border-gray-200 focus:border-[#34495e] outline-none"/>
+                                {reopenErr && <div className="text-[#c0392b] text-sm font-semibold mt-3">Password errata.</div>}
+                                <div className="grid grid-cols-2 gap-3 mt-5">
+                                    <button onClick={() => { setReopenPin(null); setReopenPw(""); setReopenErr(false); }} className="py-3 rounded-xl font-bold border-2 border-[#34495e] text-[#34495e] hover:bg-gray-50">Annulla</button>
+                                    <button onClick={confirmReopen} className="py-3 rounded-xl font-bold bg-[#34495e] text-white hover:bg-[#2c3e50]">Abilita</button>
+                                </div>
+                            </div>
+                        </Modal>
+                    )}
+
+                    {pubOpen && (
+                        <Modal onClose={() => setPubOpen(false)}>
+                            <div className="text-center">
+                                <h3 className="text-xl font-extrabold text-[#34495e]">Pubblicare i voti online?</h3>
+                                <p className="text-sm text-[#756f63] mt-2 mb-5">Gli alunni vedranno i punteggi finali, le spiegazioni e le tue note di correzione.</p>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button onClick={() => setPubOpen(false)} className="py-3 rounded-xl font-bold border-2 border-[#34495e] text-[#34495e] hover:bg-gray-50">Annulla</button>
+                                    <button onClick={pubblica} className="py-3 rounded-xl font-bold bg-[#7fb088] text-white hover:brightness-95">Sblocca per gli studenti</button>
+                                </div>
+                            </div>
+                        </Modal>
+                    )}
+
+                    {resetOpen && (
+                        <Modal onClose={() => { setResetOpen(false); setResetText(""); }}>
+                            <div className="text-center">
+                                <h3 className="text-xl font-extrabold text-[#c0392b]">Reset Totale Cloud</h3>
+                                <p className="text-sm text-[#756f63] mt-2 mb-4">Questa operazione cancella tutte le classi e tutte le prove presenti sul database di Supabase. Scrivi <span className="font-mono bg-gray-100 px-2 py-0.5 rounded text-[#c0392b]">RESET</span> per confermare.</p>
+                                <input value={resetText} onChange={e => setResetText(e.target.value)} placeholder="RESET" className="w-full text-center text-lg font-bold py-3 rounded-xl border-2 border-gray-200 focus:border-[#c0392b] outline-none mb-4"/>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button onClick={() => { setResetOpen(false); setResetText(""); }} className="py-3 rounded-xl font-bold border-2 border-[#34495e] text-[#34495e] hover:bg-gray-50">Annulla</button>
+                                    <button disabled={resetText !== 'RESET'} onClick={doReset} className="py-3 rounded-xl font-bold bg-[#c0392b] text-white disabled:opacity-30 hover:brightness-95">Svuota Cloud</button>
+                                </div>
+                            </div>
+                        </Modal>
+                    )}
+
+                    {printingCls && <PrintArea cls={printingCls} classData={db.classes[printingCls]} questions={questions} maxClosed={maxClosed} maxOpen={maxOpen} maxTotal={maxTotal} />}
+                </div>
+            );
+        };
+
+        const GradingForm = ({ student, questions, maxOpen, onSave, onClose }) => {
+            const [score, setScore] = useState(student.openScore != null ? student.openScore : 0);
+            const [comment, setComment] = useState(student.openComment || "");
+            const openQuestion = questions.find(q => q.type === 'open');
+
+            return (
+                <div>
+                    <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-xl font-extrabold text-[#34495e]">Valutazione Risposta Aperta</h3>
+                        <button onClick={onClose} className="text-gray-400 hover:text-[#34495e]"><Icon name="x" size={22}/></button>
+                    </div>
+                    <p className="font-bold text-[#2e2e2e] mb-2 leading-relaxed text-sm">{openQuestion?.question}</p>
+                    {openQuestion?.rubric && <div className="text-xs text-[#756f63] bg-[#f7dd73]/15 rounded-lg p-3 mb-4 leading-relaxed"><b>Criteri di valutazione:</b> {openQuestion.rubric}</div>}
+
+                    <div className="bg-gray-50 rounded-xl p-4 text-sm text-[#2e2e2e] whitespace-pre-wrap leading-relaxed mb-4 max-h-40 overflow-y-auto border">
+                        {student.openAnswer || <span className="italic text-gray-400">Nessun testo presente.</span>}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <div className="text-xs font-bold text-[#34495e] uppercase mb-2">Punteggio (0–{maxOpen})</div>
+                            <div className="flex flex-wrap gap-1.5">
+                                {Array.from({ length: maxOpen + 1 }, (_, i) => i).map(n => (
+                                    <button key={n} onClick={() => setScore(n)} className={`w-9 h-9 rounded-xl font-extrabold transition-all ${score===n ? 'bg-[#34495e] text-white shadow-md' : 'bg-gray-100 text-[#34495e] hover:bg-gray-200'}`}>{n}</button>
+                                ))}
+                            </div>
+                        </div>
+                        <div>
+                            <div className="text-xs font-bold text-[#34495e] uppercase mb-2">Note / Commento feedback</div>
+                            <textarea value={comment} onChange={e => setComment(e.target.value)} rows={3} placeholder="Note di correzione..." className="w-full p-3 rounded-xl border-2 border-gray-200 focus:border-[#34495e] outline-none resize-none text-sm"/>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 mt-5">
+                        <button onClick={onClose} className="py-3 rounded-xl font-bold border-2 border-[#34495e] text-[#34495e] hover:bg-gray-50">Annulla</button>
+                        <button onClick={() => onSave(student.pin, score, comment)} className="py-3 rounded-xl font-bold bg-[#34495e] text-white hover:bg-[#2c3e50]">Registra Voto</button>
+                    </div>
+                </div>
+            );
+        };
+
+        const PrintArea = ({ cls, classData, questions, maxClosed, maxOpen, maxTotal }) => {
+            const students = Object.values(classData.students)
+                .filter(s => s.status === 'submitted' || s.status === 'published')
+                .sort((a,b) => (a.lastName+a.firstName).localeCompare(b.lastName+b.firstName));
+            const closedQuestions = questions.filter(q => q.type === 'single');
+            const openQuestion = questions.find(q => q.type === 'open');
+
+            const content = (
+                <div style={{ fontFamily: 'Cabin, sans-serif', color: '#2e2e2e' }}>
+                    {students.length === 0 && <div style={{ padding: 20 }}>Nessuna prova consegnata disponibile per la stampa.</div>}
+                    {students.map(s => {
+                        const closed = s.closedScore != null ? s.closedScore : computeClosedScore(s, questions);
+                        const open = s.openScore != null ? s.openScore : 0;
+                        const tot = closed + open;
+                        const percent = Math.round(tot / maxTotal * 100);
+                        return (
+                            <div key={s.pin} className="print-student" style={{ padding: '4mm 0' }}>
+                                <div style={{ borderBottom: '3px solid #34495e', paddingBottom: 8, Richmond: 14 }}>
+                                    <div style={{ fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: '#756f63' }}>Report Esito Verifiche Live Cloud</div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 4 }}>
+                                        <div style={{ fontSize: 22, fontWeight: 800, color: '#34495e' }}>{s.lastName} {s.firstName}</div>
+                                        <div style={{ fontWeight: 700 }}>Classe {cls} · PIN {s.pin}</div>
+                                    </div>
+                                    <div style={{ marginTop: 6, fontWeight: 700 }}>
+                                        Punteggio: {tot}/{maxTotal} ({percent}%) — Risposte Chiuse {closed}/{maxClosed}, Aperta {open}/{maxOpen} — Voto {(tot/maxTotal*10).toFixed(1)}/10
+                                    </div>
+                                </div>
+
+                                {closedQuestions.map((q, i) => {
+                                    const a = s.answers[q.id];
+                                    const sel = a ? a.selection : null;
+                                    const ok = sel === q.correctIndex;
+                                    return (
+                                        <div key={q.id} className="print-q" style={{ marginBottom: 10, fontSize: 12 }}>
+                                            <div style={{ fontWeight: 700 }}>{i+1}. {q.question} <span style={{ color: ok ? '#7fb088' : '#c0392b', fontWeight: 800 }}>[{ok ? 'OK' : (sel==null ? 'n.r.' : 'X')}]</span></div>
+                                            <div style={{ marginLeft: 12 }}>
+                                                <div>Scelta dello studente: {sel != null ? q.options[sel] : <i>Non risposta</i>}</div>
+                                                {!ok && <div style={{ color: '#34495e' }}>Corretta: {q.options[q.correctIndex]}</div>}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+
+                                {openQuestion && (
+                                    <div className="print-q" style={{ marginTop: 8, fontSize: 12 }}>
+                                        <div style={{ fontWeight: 700 }}>{closedQuestions.length+1}. {openQuestion.question} <span style={{ fontWeight: 800, color: '#34495e' }}>[{open}/{maxOpen}]</span></div>
+                                        <div style={{ marginLeft: 12, whiteSpace: 'pre-wrap' }}>Risposta data: {s.openAnswer || <i>Testo vuoto</i>}</div>
+                                        {s.openComment && <div style={{ marginLeft: 12, marginTop: 4, fontStyle: 'italic', color: '#34495e' }}>Nota docente: {s.openComment}</div>}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            );
+            return ReactDOM.createPortal(content, document.getElementById('print-area'));
+        };
+
+        /* ====== BUILDER GENERATIVO ARCHIVIO STORICO HTML OFFLINE ====== */
+        const buildArchiveHTML = (cls, classData, questions, maxClosed, maxOpen, maxTotal) => {
+            const payload = { cls, classData, questions, maxClosed, maxOpen, maxTotal, SOGLIA: SOGLIA_SUFFICIENZA, generatedAt: new Date().toISOString() };
+            const dataJson = JSON.stringify(payload).replace(/</g, '\\u003c');
+            return `<!DOCTYPE html>
+<html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Archivio Storico Verifica \${cls}</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin><\/script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin><\/script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>
+<script src="https://cdn.tailwindcss.com"><\/script>
+<style>@import url('https://fonts.googleapis.com/css2?family=Cabin:wght@400;500;600;700&display=swap');body{font-family:Cabin,sans-serif;background:#fcfcfc;color:#2e2e2e;}</style>
+</head><body><div id="root"></div><script>window.__ARCHIVE__ = \${dataJson};<\/script>
+<script type="text/babel">
+    const { useState } = React;
+    const D = window.__ARCHIVE__;
+    const Q = D.questions;
+    const CLOSED = Q.filter(q => q.type==='single');
+    const OPEN = Q.find(q => q.type==='open');
+
+    function ArchiveApp() {
+        const [sel, setSel] = useState(null);
+        const students = Object.values(D.classData.students).sort((a,b)=>(a.lastName+a.firstName).localeCompare(b.lastName+b.firstName));
+        const student = sel ? D.classData.students[sel] : null;
+
+        if (student) {
+            const pct = Math.round(( (student.closedScore||0) + (student.openScore||0) ) / D.maxTotal * 100);
+            return (
+                <div className="max-w-2xl mx-auto px-4 py-6">
+                    <button onClick={()=>setSel(null)} className="mb-4 text-sm font-bold text-[#34495e]">&larr; Sfoglia Elenco</button>
+                    <div className="bg-white rounded-3xl shadow-md p-6 mb-4 border border-gray-100">
+                        <h2 className="text-xl font-bold text-[#34495e]">{student.lastName} {student.firstName}</h2>
+                        <div className="text-sm text-gray-500 font-semibold">Esito: \${pct}% — Totale: \${(student.closedScore||0)+(student.openScore||0)}/\${D.maxTotal}</div>
+                    </div>
+                    {CLOSED.map((q, i) => {
+                        const a = student.answers[q.id];
+                        const ok = a && a.selection === q.correctIndex;
+                        return (
+                            <div key={q.id} className={"bg-white p-5 rounded-xl border-l-8 mb-3 shadow-sm " + (ok ? "border-[#7fb088]" : "border-[#c0392b]")}>
+                                <p className="font-bold text-sm mb-2">\${i+1}. \${q.question}</p>
+                                <div className="space-y-1.5">
+                                    {q.options.map((opt, idx) => (
+                                        <div key={idx} className={"p-2.5 rounded-lg text-xs font-medium border " + (idx===q.correctIndex ? "bg-[#7fb088] text-white" : (a&&a.selection===idx ? "bg-[#c0392b] text-white" : "bg-gray-50 text-gray-400"))}>\${opt}</div>
+                                    ))}
+                                </div>
+                            </div>
+                        );
+                    })}
+                    {OPEN && (
+                        <div className="bg-white p-5 rounded-xl border-l-8 border-[#34495e] shadow-sm">
+                            <p className="font-bold text-sm mb-2">Quesito Aperto</p>
+                            <div className="bg-gray-50 p-3 rounded-lg text-xs leading-relaxed border whitespace-pre-wrap">\${student.openAnswer || "—"}</div>
+                            {student.openComment && <div className="mt-3 bg-blue-50 p-3 rounded-lg text-xs"><b>Nota:</b> \${student.openComment}</div>}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        return (
+            <div className="max-w-4xl mx-auto px-4 py-6">
+                <div className="bg-[#34495e] text-white p-6 rounded-2xl mb-6 shadow-md">
+                    <h1 className="text-xl font-bold">Consultazione Storica offline · Classe \${D.cls}</h1>
+                    <p className="text-xs text-white/70 mt-1">Generato in data \${new Date(D.generatedAt).toLocaleString('it-IT')}</p>
+                </div>
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                    <table className="w-full text-sm text-left">
+                        <thead className="bg-gray-50 text-gray-500 text-xs uppercase"><tr><th className="p-4">PIN</th><th className="p-4">Studente</th><th className="p-4 text-center">Esito %</th></tr></thead>
+                        <tbody>
+                            {students.map(s => {
+                                const tot = (s.closedScore||0) + (s.openScore||0);
+                                const pct = Math.round(tot / D.maxTotal * 100);
+                                return (
+                                    <tr key={s.pin} onClick={()=>setSel(s.pin)} className="border-t hover:bg-gray-50 cursor-pointer">
+                                        <td className="p-4 font-mono font-bold text-[#34495e]">\${s.pin}</td>
+                                        <td className="p-4 font-semibold">\${s.lastName} \${s.firstName}</td>
+                                        <td className="p-4 text-center font-bold">\${pct}%</td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        );
     }
-    // Per il collaudo la verifica è incorporata nell'app
-    setStudente(r.studente); setQuiz(QUIZ_MARKETING); setView('studente');
-    return { ok: true };
-  };
+    ReactDOM.createRoot(document.getElementById('root')).render(<ArchiveApp/>);
+<\/script></body></html>`;
+        };
 
-  if (view === 'studente' && studente && quiz) return <Studente studente={studente} quiz={quiz} onFine={() => setView('home')} />;
-  if (view === 'docente') return <Docente onExit={() => setView('home')} />;
-  return <Home onStudente={onStudente} onDocente={() => setView('docente')} />;
-};
+        /* =====================================================================
+           CORE CORE CORE DIRECTING DISPATCHER CON SYNC REALTIME CLOUD
+        ===================================================================== */
+        const App = () => {
+            const [view, setView] = useState('landing'); 
+            const [session, setSession] = useState(null);
+            const [db, setDb] = useState({ version: 1, classes: {}, questions: [] });
+            const [loading, setLoading] = useState(true);
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
-</script>
+            const pullCloudState = async () => {
+                const { data, error } = await supabase.from('app_state').select('db_data, questions_data').eq('id', 1).single();
+                if (!error && data) {
+                    setDb({ version: 1, classes: data.db_data.classes || {}, questions: data.questions_data || [] });
+                }
+                setLoading(false);
+            };
+
+            useEffect(() => {
+                pullCloudState();
+                
+                // Utilizziamo il polling (richieste periodiche) invece dei WebSocket
+                // perché i WebSocket (Realtime) sono bloccati per sicurezza in questo ambiente.
+                const intervalId = setInterval(() => {
+                    pullCloudState();
+                }, 3000); // Aggiorna i dati ogni 3 secondi
+
+                return () => { clearInterval(intervalId); };
+            }, []);
+
+            useEffect(() => {
+                try {
+                    const raw = sessionStorage.getItem(SESSION_KEY);
+                    if (raw) {
+                        const { pin, cls } = JSON.parse(raw);
+                        setSession({ pin, cls });
+                        setView('student');
+                    }
+                } catch (e) { }
+            }, []);
+
+            const syncUpdateCloud = async (cls, pin, updatedStudentData, fullClasses = null, fullQuestions = null) => {
+                let currentClasses = fullClasses ? fullClasses : { ...db.classes };
+                let currentQuestions = fullQuestions ? fullQuestions : [ ...db.questions ];
+                
+                if (cls && pin && updatedStudentData) {
+                    currentClasses[cls].students[pin] = updatedStudentData;
+                }
+
+                setDb({ version: 1, classes: currentClasses, questions: currentQuestions });
+                await supabase.from('app_state').update({ db_data: { classes: currentClasses }, questions_data: currentQuestions }).eq('id', 1);
+            };
+
+            const resetDatabaseCloud = async () => {
+                const clearState = { classes: {}, questions: [] };
+                setDb({ version: 1, classes: {}, questions: [] });
+                await supabase.from('app_state').update({ db_data: { classes: {} }, questions_data: [] }).eq('id', 1);
+            };
+
+            const handleStudentLogin = (pin, callback) => {
+                const found = findStudent(db.classes, pin);
+                if (!found) { callback({ ok: false, msg: "PIN non censito a sistema." }); return; }
+                const { cls, student } = found;
+
+                if (student.status === 'idle') {
+                    const updated = { ...student, status: 'playing', startedAt: Date.now(), optionOrder: buildOptionOrder(db.questions) };
+                    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
+                    setSession({ pin, cls }); setView('student');
+                    syncUpdateCloud(cls, pin, updated);
+                    callback({ ok: true });
+                } else {
+                    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
+                    setSession({ pin, cls }); setView('student');
+                    callback({ ok: true });
+                }
+            };
+
+            const closedQuestions = db.questions ? db.questions.filter(q => q.type === 'single') : [];
+            const openQuestion = db.questions ? db.questions.find(q => q.type === 'open') : null;
+            const maxClosed = closedQuestions.reduce((a, q) => a + q.points, 0);
+            const maxOpen = openQuestion ? openQuestion.points : 0;
+            const maxTotal = maxClosed + maxOpen;
+
+            if (loading) {
+                return (
+                    <div className="flex-grow flex items-center justify-center bg-white">
+                        <div className="text-center font-bold text-[#34495e]">Connessione al Cloud Engine...</div>
+                    </div>
+                );
+            }
+
+            if (view === 'admin') return <AdminApp db={db} maxClosed={maxClosed} maxOpen={maxOpen} maxTotal={maxTotal} onSyncUpdate={syncUpdateCloud} onResetDB={resetDatabaseCloud} onExit={() => setView('landing')} />;
+            if (view === 'student' && session) return <StudentApp pin={session.pin} cls={session.cls} db={db} maxClosed={maxClosed} maxOpen={maxOpen} maxTotal={maxTotal} onSyncUpdate={syncUpdateCloud} onExit={() => { sessionStorage.removeItem(SESSION_KEY); setSession(null); setView('landing'); }} />;
+            return <Landing onStudent={handleStudentLogin} onAdmin={() => setView('admin')} />;
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
 </body>
 </html>
