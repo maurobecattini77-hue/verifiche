@@ -96,7 +96,7 @@
 
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-        const ADMIN_PASSWORD = "admin";      
+        const ADMIN_PASSWORD = "16031948";      
         const SESSION_KEY = "ab_exam_session_v1"; 
         const SOGLIA_SUFFICIENZA = 60;            
 
@@ -616,7 +616,10 @@
             };
 
             const sblocca = (pin) => {
-                const st = { ...classData.students[pin], status: 'idle' };
+                const cur = classData.students[pin];
+                const st = { ...cur, status: 'playing', resumeAllowed: true };
+                if (!st.optionOrder || Object.keys(st.optionOrder).length === 0) st.optionOrder = buildOptionOrder(questions);
+                if (!st.startedAt) st.startedAt = Date.now();
                 onSyncUpdate(cls, pin, st);
             };
 
@@ -723,11 +726,16 @@
             };
 
             const doReset = () => {
-                exportFullBackup();            // sicurezza: scarica tutto prima di cancellare
-                onResetDB();
+                if (!cls || !db.classes[cls]) { setResetOpen(false); setResetText(""); return; }
+                exportBackup();                // sicurezza: scarica il backup di QUESTA classe prima di rimuoverla
+                const updated = { ...db.classes };
+                delete updated[cls];           // rimuovo solo la classe selezionata; le altre restano intatte
+                onSyncUpdate(null, null, null, updated, db.questions);
+                const rimaste = Object.keys(updated);
+                setCls(rimaste[0] || "");
                 setResetOpen(false);
                 setResetText("");
-                alert("Eseguito: e' stato scaricato un backup completo e il database cloud e' stato azzerato.");
+                alert("Classe " + cls + " rimossa dal cloud (backup scaricato). Le altre classi restano attive.");
             };
             
             useEffect(() => {
@@ -747,8 +755,8 @@
                             <div className="flex items-center gap-3">
                                 <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center"><Icon name="shield" size={22}/></div>
                                 <div className="leading-tight">
-                                    <div className="font-extrabold text-lg">Cruscotto Docente Cloud</div>
-                                    <div className="text-xs text-white/60">Amministrazione centralizzata esami</div>
+                                    <div className="font-extrabold text-lg">Cruscotto Docente</div>
+                                    <div className="text-xs text-white/60">Mauro Becattini</div>
                                 </div>
                             </div>
                             <div className="flex items-center gap-2">
@@ -792,7 +800,7 @@
                                     <button onClick={exportBackup} className="bg-white border-2 border-[#34495e] text-[#34495e] font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-gray-50 scale-hover"><Icon name="download" size={16}/> Scarica Backup</button>
                                     <input type="file" accept=".json" ref={backupInputRef} onChange={handleRestoreBackup} className="hidden" />
                                     <button onClick={() => backupInputRef.current.click()} className="bg-white border-2 border-[#34495e] text-[#34495e] font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-gray-50 scale-hover"><Icon name="refresh" size={16}/> Ripristina Backup</button>
-                                    <button onClick={() => setResetOpen(true)} className="bg-white border-2 border-[#c0392b] text-[#c0392b] font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-[#c0392b]/5 scale-hover ml-auto"><Icon name="trash" size={16}/> Reset Cloud Completo</button>
+                                    <button onClick={() => setResetOpen(true)} className="bg-white border-2 border-[#c0392b] text-[#c0392b] font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-[#c0392b]/5 scale-hover ml-auto"><Icon name="trash" size={16}/> Reset Classe</button>
                                 </div>
 
                                 <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4">
@@ -904,12 +912,12 @@
                     {resetOpen && (
                         <Modal onClose={() => { setResetOpen(false); setResetText(""); }}>
                             <div className="text-center">
-                                <h3 className="text-xl font-extrabold text-[#c0392b]">Reset Totale Cloud</h3>
-                                <p className="text-sm text-[#756f63] mt-2 mb-4">Questa operazione cancella tutte le classi e tutte le prove presenti sul database di Supabase. Scrivi <span className="font-mono bg-gray-100 px-2 py-0.5 rounded text-[#c0392b]">RESET</span> per confermare.</p>
+                                <h3 className="text-xl font-extrabold text-[#c0392b]">Reset della classe {cls}</h3>
+                                <p className="text-sm text-[#756f63] mt-2 mb-4">Questa operazione rimuove dal cloud <b>solo la classe {cls}</b> (alunni, risposte e correzioni); tutte le altre classi restano intatte. Prima della rimozione viene scaricato in automatico un backup di questa classe. Scrivi <span className="font-mono bg-gray-100 px-2 py-0.5 rounded text-[#c0392b]">RESET</span> per confermare.</p>
                                 <input value={resetText} onChange={e => setResetText(e.target.value)} placeholder="RESET" className="w-full text-center text-lg font-bold py-3 rounded-xl border-2 border-gray-200 focus:border-[#c0392b] outline-none mb-4"/>
                                 <div className="grid grid-cols-2 gap-3">
                                     <button onClick={() => { setResetOpen(false); setResetText(""); }} className="py-3 rounded-xl font-bold border-2 border-[#34495e] text-[#34495e] hover:bg-gray-50">Annulla</button>
-                                    <button disabled={resetText !== 'RESET'} onClick={doReset} className="py-3 rounded-xl font-bold bg-[#c0392b] text-white disabled:opacity-30 hover:brightness-95">Svuota Cloud</button>
+                                    <button disabled={resetText !== 'RESET'} onClick={doReset} className="py-3 rounded-xl font-bold bg-[#c0392b] text-white disabled:opacity-30 hover:brightness-95">Rimuovi questa classe</button>
                                 </div>
                             </div>
                         </Modal>
@@ -1250,12 +1258,21 @@
                     setSession({ pin, cls }); setView('student');
                     callback({ ok: true });
                 } else if (student.status === 'playing') {
-                    // Blocco anti-furbetto: era in playing e sta usando un nuovo dispositivo/scheda
-                    const updated = { ...student, status: 'locked' };
-                    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
-                    setSession({ pin, cls }); setView('student');
-                    syncUpdateCloud(cls, pin, updated);
-                    callback({ ok: true });
+                    // Se il docente ha appena sbloccato, concedo UN rientro per riprendere da dove era.
+                    if (student.resumeAllowed) {
+                        const updated = { ...student, resumeAllowed: false };
+                        sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
+                        setSession({ pin, cls }); setView('student');
+                        syncUpdateCloud(cls, pin, updated);
+                        callback({ ok: true });
+                    } else {
+                        // Blocco anti-furbetto: era in corso e sta entrando da un altro dispositivo/scheda
+                        const updated = { ...student, status: 'locked' };
+                        sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
+                        setSession({ pin, cls }); setView('student');
+                        syncUpdateCloud(cls, pin, updated);
+                        callback({ ok: true });
+                    }
                 } else if (student.status === 'locked') {
                     // Già bloccato, va alla pagina di blocco
                     sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
