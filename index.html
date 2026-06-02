@@ -422,6 +422,15 @@
             const [idx, setIdx] = useState(0);
             const [confirmOpen, setConfirmOpen] = useState(false);
 
+            // Lo sblocco del docente concede UN solo rientro: appena lo studente è di nuovo
+            // "in corso" (sia rientrando col PIN, sia con la pagina che si riapre da sola)
+            // il permesso viene consumato. Se esce ancora, sarà di nuovo bloccato.
+            useEffect(() => {
+                if (student && student.status === 'playing' && student.resumeAllowed) {
+                    onSyncUpdate(cls, pin, { ...student, resumeAllowed: false });
+                }
+            }, [student && student.status, student && student.resumeAllowed]);
+
             const answer = (qid, selection) => {
                 if (student.status !== 'playing') return;
                 const updatedStudent = { ...student };
