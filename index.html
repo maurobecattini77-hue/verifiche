@@ -222,6 +222,20 @@
         // Numero "all'italiana" (virgola decimale)
         const fmtN = (n) => parseFloat(Number(n || 0).toFixed(2)).toString().replace('.', ',');
 
+        // Conversione percentuale → voto del registro (3 minimo, 10 massimo)
+        const votoFromPercent = (percent) => {
+            const p = Math.round(percent);
+            if (p <= 30) return "3";
+            const tabella = [
+                [41, "4"], [43, "4+"], [46, "4,5"], [48, "5-"], [51, "5"], [53, "5+"], [56, "5,5"],
+                [58, "6-"], [61, "6"], [63, "6+"], [66, "6,5"], [68, "7-"], [71, "7"], [73, "7+"],
+                [76, "7,5"], [78, "8-"], [81, "8"], [83, "8+"], [86, "8,5"], [88, "9-"], [91, "9"],
+                [93, "9+"], [96, "9,5"], [98, "10-"], [100, "10"]
+            ];
+            for (let k = 0; k < tabella.length; k++) { if (p <= tabella[k][0]) return tabella[k][1]; }
+            return "10";
+        };
+
         const findStudent = (classes, pin) => {
             for (const cls of Object.keys(classes)) {
                 if (classes[cls].students[pin]) {
@@ -458,13 +472,7 @@
                     {reveal && g && g.comment && (
                         <div className="bg-[#aed6f1]/20 rounded-xl p-4 text-sm mt-3">
                             <div className="text-xs font-bold text-[#34495e] uppercase mb-1">Commento del docente</div>
-                            <div className="text-[#2e2e2e] leading-relaxed">{g.comment}</div>
-                        </div>
-                    )}
-                    {reveal && q.idealAnswer && (
-                        <div className="mt-3 p-4 bg-[#aed6f1]/10 border-l-4 border-[#34495e] rounded">
-                            <div className="text-xs font-bold text-[#34495e] uppercase mb-1">Risposta ideale · punti chiave</div>
-                            <p className="text-sm text-[#2e2e2e] leading-relaxed">{q.idealAnswer}</p>
+                            <div className="text-[#2e2e2e] leading-relaxed whitespace-pre-wrap">{g.comment}</div>
                         </div>
                     )}
                 </div>
@@ -552,7 +560,7 @@
                         {reveal ? (
                             <div className="text-right">
                                 <div className={`text-3xl font-extrabold tracking-tight ${passed ? 'text-[#7fb088]' : 'text-[#c0392b]'}`}>{percent}%</div>
-                                <div className="text-xs font-semibold text-[#756f63]">{fmtN(total)}/{fmtN(bd.totalMax)} · {(bd.totalMax ? total/bd.totalMax*10 : 0).toFixed(1)}/10</div>
+                                <div className="text-xs font-semibold text-[#756f63]">{fmtN(total)}/{fmtN(bd.totalMax)} · voto {votoFromPercent(bd.percent)}</div>
                             </div>
                         ) : (
                             <div className="text-right">
@@ -793,8 +801,6 @@
             const [grading, setGrading] = useState(null);   
             const [viewPin, setViewPin] = useState(null);    
             const [reopenPin, setReopenPin] = useState(null);
-            const [reopenPw, setReopenPw] = useState("");
-            const [reopenErr, setReopenErr] = useState(false);
             const [resetOpen, setResetOpen] = useState(false);
             const [resetText, setResetText] = useState("");
             const [pubOpen, setPubOpen] = useState(false);
@@ -880,13 +886,16 @@
             };
 
             const requestGrade = (s) => {
-                if (s.graded) { setReopenPin(s.pin); setReopenPw(""); setReopenErr(false); }
-                else setGrading(s.pin);
+                if (s.status === 'published') { setReopenPin(s.pin); }   // prova già pubblicata: chiedo conferma di riapertura
+                else setGrading(s.pin);                                  // altrimenti correggo subito, senza blocchi
             };
             
-            const confirmReopen = () => {
-                if (reopenPw === ADMIN_PASSWORD) { setGrading(reopenPin); setReopenPin(null); setReopenPw(""); }
-                else { setReopenErr(true); setReopenPw(""); }
+            const doReopen = () => {
+                const pin = reopenPin;
+                const st = { ...classData.students[pin], status: 'submitted' };  // torna "consegnata": lo studente rivede "in attesa"
+                onSyncUpdate(cls, pin, st);
+                setReopenPin(null);
+                setGrading(pin);
             };
 
             const pubblica = () => {
@@ -1073,6 +1082,8 @@
                                                     <th className="px-4 py-3 font-bold text-center">Chiuse</th>
                                                     <th className="px-4 py-3 font-bold text-center">Aperte</th>
                                                     <th className="px-4 py-3 font-bold text-center">Totale</th>
+                                                    <th className="px-4 py-3 font-bold text-center">%</th>
+                                                    <th className="px-4 py-3 font-bold text-center">Voto</th>
                                                     <th className="px-4 py-3 font-bold text-right">Azioni</th>
                                                 </tr>
                                             </thead>
@@ -1098,12 +1109,14 @@
                                                             </td>
                                                             <td className="px-4 py-3 text-center font-semibold text-[#34495e]">{submitted ? `${fmtN(bd.closedScore)}/${fmtN(bd.closedMax)}` : '—'}</td>
                                                             <td className="px-4 py-3 text-center font-semibold">{submitted ? (hasOpen ? (s.graded ? `${fmtN(bd.openScore)}/${fmtN(bd.openMax)}` : <span className="text-[#c0392b]">da valutare</span>) : '—') : '—'}</td>
-                                                            <td className="px-4 py-3 text-center">{tot != null ? <span className="inline-flex items-center gap-1 font-extrabold text-[#34495e]">{fmtN(tot)}/{fmtN(bd.totalMax)}{s.graded && hasOpen && <Icon name="lock" size={12} className="text-[#7fb088]" />}</span> : <span className="text-gray-400">—</span>}</td>
+                                                            <td className="px-4 py-3 text-center">{tot != null ? <span className="inline-flex items-center gap-1 font-extrabold text-[#34495e]">{fmtN(tot)}/{fmtN(bd.totalMax)}{s.status === 'published' && <Icon name="lock" size={12} className="text-[#7fb088]" />}</span> : <span className="text-gray-400">—</span>}</td>
+                                                            <td className="px-4 py-3 text-center font-bold text-[#34495e]">{tot != null ? `${Math.round(bd.percent)}%` : '—'}</td>
+                                                            <td className="px-4 py-3 text-center">{tot != null ? <span className={`font-extrabold ${bd.percent >= SOGLIA_SUFFICIENZA ? 'text-[#7fb088]' : 'text-[#c0392b]'}`}>{votoFromPercent(bd.percent)}</span> : <span className="text-gray-400">—</span>}</td>
                                                             <td className="px-4 py-3">
                                                                 <div className="flex justify-end gap-1.5 flex-wrap">
                                                                     {locked && <button onClick={() => sblocca(s.pin)} className="bg-[#aed6f1]/30 text-[#34495e] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-[#aed6f1]/60"><Icon name="unlock" size={14}/> Sblocca</button>}
                                                                     {canView && <button onClick={() => setViewPin(s.pin)} className="bg-gray-100 text-[#34495e] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-gray-200"><Icon name="eye" size={14}/> Sfoglia</button>}
-                                                                    {submitted && <button onClick={() => requestGrade(s)} className={`rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 ${s.graded ? 'bg-[#7fb088]/15 text-[#4c7a55] hover:bg-[#7fb088]/30' : 'bg-[#f7dd73]/30 text-[#7a6310] hover:bg-[#f7dd73]/60'}`}><Icon name={s.graded ? 'lock' : 'edit'} size={14}/> {s.graded ? 'Rivaluta' : 'Valuta'}</button>}
+                                                                    {submitted && <button onClick={() => requestGrade(s)} className={`rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 ${s.status === 'published' ? 'bg-[#7fb088]/15 text-[#4c7a55] hover:bg-[#7fb088]/30' : 'bg-[#f7dd73]/30 text-[#7a6310] hover:bg-[#f7dd73]/60'}`}><Icon name={s.status === 'published' ? 'unlock' : 'edit'} size={14}/> {s.status === 'published' ? 'Riapri' : (s.graded ? 'Modifica' : 'Valuta')}</button>}
                                                                 </div>
                                                             </td>
                                                         </tr>
@@ -1118,7 +1131,7 @@
                     </div>
 
                     {gradingStudent && (
-                        <Modal onClose={() => setGrading(null)} maxW="max-w-2xl">
+                        <Modal onClose={() => setGrading(null)} maxW="max-w-3xl">
                             <GradingForm student={gradingStudent} questions={questions} onSave={saveGrade} onClose={() => setGrading(null)} />
                         </Modal>
                     )}
@@ -1131,15 +1144,13 @@
                     )}
 
                     {reopenPin && (
-                        <Modal onClose={() => { setReopenPin(null); setReopenPw(""); setReopenErr(false); }}>
+                        <Modal onClose={() => setReopenPin(null)}>
                             <div className="text-center">
-                                <h3 className="text-xl font-extrabold text-[#34495e]">Modifica Valutazione</h3>
-                                <p className="text-sm text-[#756f63] mt-2 mb-4">Questa correzione è registrata. Inserisci la password per abilitare la modifica.</p>
-                                <input type="password" value={reopenPw} autoFocus onChange={e => { setReopenPw(e.target.value); setReopenErr(false); }} onKeyDown={e => e.key === 'Enter' && confirmReopen()} placeholder="Password" className="w-full text-center text-lg font-semibold py-3 rounded-xl border-2 border-gray-200 focus:border-[#34495e] outline-none"/>
-                                {reopenErr && <div className="text-[#c0392b] text-sm font-semibold mt-3">Password errata.</div>}
+                                <h3 className="text-xl font-extrabold text-[#34495e]">Riaprire la valutazione</h3>
+                                <p className="text-sm text-[#756f63] mt-2 mb-4">Questa prova è già stata pubblicata. Riaprendola potrai modificare i punteggi; lo studente tornerà a vedere <b>"in attesa"</b> finché non ripubblichi i voti.</p>
                                 <div className="grid grid-cols-2 gap-3 mt-5">
-                                    <button onClick={() => { setReopenPin(null); setReopenPw(""); setReopenErr(false); }} className="py-3 rounded-xl font-bold border-2 border-[#34495e] text-[#34495e] hover:bg-gray-50">Annulla</button>
-                                    <button onClick={confirmReopen} className="py-3 rounded-xl font-bold bg-[#34495e] text-white hover:bg-[#2c3e50]">Abilita</button>
+                                    <button onClick={() => setReopenPin(null)} className="py-3 rounded-xl font-bold border-2 border-[#34495e] text-[#34495e] hover:bg-gray-50">Annulla</button>
+                                    <button onClick={doReopen} className="py-3 rounded-xl font-bold bg-[#34495e] text-white hover:bg-[#2c3e50]">Riapri</button>
                                 </div>
                             </div>
                         </Modal>
@@ -1195,38 +1206,53 @@
             const totalOpen = opens.reduce((t, q) => t + (grades[q.id] ? grades[q.id].score : 0), 0);
             const maxOpenAll = opens.reduce((t, q) => t + q.points, 0);
 
+            // anteprima live di totale, percentuale e voto, considerando i punteggi che sto digitando ora
+            const liveStudent = { ...student, openGrades: grades };
+            const bd = computeBreakdown(liveStudent, questions);
+            const pct = bd.totalMax ? Math.round(bd.percent) : 0;
+            const passed = bd.percent >= SOGLIA_SUFFICIENZA;
+
             return (
                 <div>
-                    <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center justify-between mb-1">
                         <h3 className="text-xl font-extrabold text-[#34495e]">Correzione domande aperte</h3>
                         <button onClick={onClose} className="text-gray-400 hover:text-[#34495e]"><Icon name="x" size={22}/></button>
                     </div>
-                    <div className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">{student.lastName} {student.firstName}</div>
-                    <div className="text-sm font-bold text-[#34495e] mb-4">Totale aperte: {fmtN(totalOpen)} / {fmtN(maxOpenAll)}</div>
+                    <div className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">{student.lastName} {student.firstName}</div>
 
-                    <div className="space-y-5 max-h-[55vh] overflow-y-auto pr-1">
+                    <div className="bg-[#34495e] text-white rounded-2xl px-5 py-3 mb-4 flex items-center justify-between flex-wrap gap-3">
+                        <div className="flex items-center gap-4 text-sm font-semibold">
+                            <span className="text-white/70">Chiuse <b className="text-white">{fmtN(bd.closedScore)}</b>/{fmtN(bd.closedMax)}</span>
+                            <span className="text-white/70">Aperte <b className="text-white">{fmtN(totalOpen)}</b>/{fmtN(maxOpenAll)}</span>
+                            <span className="text-white/70">Totale <b className="text-white">{fmtN(bd.total)}</b>/{fmtN(bd.totalMax)}</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <div className="text-right"><div className="text-[11px] uppercase tracking-widest text-white/60">Percentuale</div><div className={`text-2xl font-extrabold ${passed ? 'text-[#a8e0b3]' : 'text-[#f3a39a]'}`}>{pct}%</div></div>
+                            <div className="text-right border-l border-white/20 pl-3"><div className="text-[11px] uppercase tracking-widest text-white/60">Voto</div><div className={`text-2xl font-extrabold ${passed ? 'text-[#a8e0b3]' : 'text-[#f3a39a]'}`}>{votoFromPercent(bd.percent)}</div></div>
+                        </div>
+                    </div>
+
+                    <div className="space-y-6 max-h-[52vh] overflow-y-auto pr-1">
                         {opens.map((q, i) => {
                             const a = student.answers && student.answers[q.id];
                             const txt = (a && typeof a.selection === 'string') ? a.selection : '';
                             return (
-                                <div key={q.id} className="border-b border-gray-100 pb-5 last:border-0">
+                                <div key={q.id} className="border-b border-gray-100 pb-6 last:border-0">
                                     <div className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Aperta {i+1} · max {fmtN(q.points)} pt</div>
                                     <p className="font-bold text-[#2e2e2e] mb-2 leading-relaxed text-sm">{q.question}</p>
-                                    {q.rubric && <div className="text-xs text-[#756f63] bg-[#f7dd73]/15 rounded-lg p-3 mb-2 leading-relaxed"><b>Griglia:</b> {q.rubric}</div>}
                                     <div className="text-xs font-bold text-[#34495e] uppercase mb-1">Risposta dell'alunno</div>
-                                    <div className="bg-gray-50 rounded-xl p-3 text-sm whitespace-pre-wrap leading-relaxed mb-2 max-h-40 overflow-y-auto border">{txt || <span className="italic text-gray-400">Nessun testo presente.</span>}</div>
-                                    {q.idealAnswer && <div className="bg-[#aed6f1]/15 rounded-lg p-3 text-xs leading-relaxed mb-3"><b className="text-[#34495e]">Punti chiave attesi:</b> {q.idealAnswer}</div>}
-                                    <div className="flex flex-col md:flex-row md:items-center gap-3">
-                                        <div className="flex items-center gap-2">
-                                            <label className="text-sm font-bold text-[#34495e]">Punteggio</label>
-                                            <input type="number" min="0" max={q.points} step="0.1" value={grades[q.id] ? grades[q.id].score : 0}
-                                                onChange={(e) => setScore(q.id, q.points, e.target.value)}
-                                                className="w-24 p-2 rounded-lg border-2 border-gray-200 focus:border-[#34495e] outline-none text-center font-bold"/>
-                                            <span className="text-sm text-[#756f63]">/ {fmtN(q.points)}</span>
-                                        </div>
-                                        <input value={grades[q.id] ? grades[q.id].comment : ''} onChange={(e) => setComment(q.id, e.target.value)} placeholder="Commento (facoltativo)"
-                                            className="flex-grow p-2 rounded-lg border-2 border-gray-200 focus:border-[#34495e] outline-none text-sm"/>
+                                    <div className="bg-gray-50 rounded-xl p-3 text-sm whitespace-pre-wrap leading-relaxed mb-3 max-h-48 overflow-y-auto border">{txt || <span className="italic text-gray-400">Nessun testo presente.</span>}</div>
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <label className="text-sm font-bold text-[#34495e]">Punteggio</label>
+                                        <input type="number" min="0" max={q.points} step="0.1" value={grades[q.id] ? grades[q.id].score : 0}
+                                            onChange={(e) => setScore(q.id, q.points, e.target.value)}
+                                            className="w-24 p-2 rounded-lg border-2 border-gray-200 focus:border-[#34495e] outline-none text-center font-bold"/>
+                                        <span className="text-sm text-[#756f63]">/ {fmtN(q.points)} punti</span>
                                     </div>
+                                    <div className="text-xs font-bold text-[#34495e] uppercase mb-1">Commento del docente</div>
+                                    <textarea value={grades[q.id] ? grades[q.id].comment : ''} onChange={(e) => setComment(q.id, e.target.value)} rows={6}
+                                        placeholder="Scrivi qui un commento articolato per lo studente e la famiglia (puoi anche incollare un testo lungo)…"
+                                        className="w-full p-3 rounded-xl border-2 border-gray-200 focus:border-[#34495e] outline-none text-sm leading-relaxed resize-y overflow-y-auto min-h-[7rem]"/>
                                 </div>
                             );
                         })}
@@ -1301,7 +1327,7 @@
                                         Punteggio: {fmtN(bd.total)}/{fmtN(bd.totalMax)} ({percent}%)
                                         {hasClosed && <span> — Chiuse {fmtN(bd.closedScore)}/{fmtN(bd.closedMax)}</span>}
                                         {hasOpen && <span>, Aperte {fmtN(bd.openScore)}/{fmtN(bd.openMax)}</span>}
-                                        {' '}— Voto {(bd.totalMax ? bd.total/bd.totalMax*10 : 0).toFixed(1)}/10
+                                        {' '}— Voto {votoFromPercent(bd.percent)}
                                     </div>
                                 </div>
 
@@ -1337,6 +1363,13 @@
                 const Q = D.questions;
                 const SOGLIA = D.SOGLIA;
                 const fmtN = function(n){ return parseFloat(Number(n||0).toFixed(2)).toString().replace('.', ','); };
+                const votoFromPercent = function(percent){
+                    var p = Math.round(percent);
+                    if (p <= 30) return "3";
+                    var t = [[41,"4"],[43,"4+"],[46,"4,5"],[48,"5-"],[51,"5"],[53,"5+"],[56,"5,5"],[58,"6-"],[61,"6"],[63,"6+"],[66,"6,5"],[68,"7-"],[71,"7"],[73,"7+"],[76,"7,5"],[78,"8-"],[81,"8"],[83,"8+"],[86,"8,5"],[88,"9-"],[91,"9"],[93,"9+"],[96,"9,5"],[98,"10-"],[100,"10"]];
+                    for (var k=0;k<t.length;k++){ if (p<=t[k][0]) return t[k][1]; }
+                    return "10";
+                };
                 const pointsFor = function(q, s){
                     if(q.type==='open'){ var g=s.openGrades&&s.openGrades[q.id]; return (g&&g.score!=null)?g.score:0; }
                     var a=s.answers&&s.answers[q.id]; if(!a||a.selection==null) return 0; var sel=a.selection;
@@ -1390,15 +1423,14 @@
                     return (
                         <div>
                             <div className="bg-gray-50 rounded-xl p-4 text-sm whitespace-pre-wrap leading-relaxed text-[#2e2e2e]">{txt||"\u2014"}</div>
-                            {g&&g.comment?<div className="bg-[#aed6f1]/20 rounded-xl p-4 text-sm mt-3"><div className="text-xs font-bold text-[#34495e] uppercase mb-1">Commento del docente</div><div className="text-[#2e2e2e] leading-relaxed">{g.comment}</div></div>:null}
-                            {q.idealAnswer?<div className="mt-3 p-4 bg-[#aed6f1]/10 border-l-4 border-[#34495e] rounded"><div className="text-xs font-bold text-[#34495e] uppercase mb-1">Risposta ideale · punti chiave</div><p className="text-sm text-[#2e2e2e] leading-relaxed">{q.idealAnswer}</p></div>:null}
+                            {g&&g.comment?<div className="bg-[#aed6f1]/20 rounded-xl p-4 text-sm mt-3"><div className="text-xs font-bold text-[#34495e] uppercase mb-1">Commento del docente</div><div className="text-[#2e2e2e] leading-relaxed whitespace-pre-wrap">{g.comment}</div></div>:null}
                         </div>
                     );
                 }
 
                 function Dettaglio(props){
                     var s=props.student; var bd=breakdown(s);
-                    var pct=bd.totalMax?Math.round(bd.percent):0; var voto=bd.totalMax?(bd.total/bd.totalMax*10):0; var passed=pct>=SOGLIA;
+                    var pct=bd.totalMax?Math.round(bd.percent):0; var voto=votoFromPercent(bd.percent); var passed=pct>=SOGLIA;
                     var list=ordered(s); var hasClosed=bd.closedMax>0, hasOpen=bd.openMax>0;
                     return (
                         <div className="max-w-2xl mx-auto px-4 py-6">
@@ -1406,7 +1438,7 @@
                             <div className="bg-white rounded-3xl shadow-md border border-gray-100 p-7 mb-5">
                                 <div className="flex justify-between items-start">
                                     <div><div className="text-xs font-bold text-gray-400 uppercase tracking-widest">Classe {D.cls} · PIN {s.pin}</div><h2 className="text-2xl font-extrabold text-[#34495e]">{s.lastName} {s.firstName}</h2></div>
-                                    <div className="text-right"><div className={"text-4xl font-extrabold "+(passed?"text-[#7fb088]":"text-[#c0392b]")}>{voto.toFixed(1)}<span className="text-base text-[#756f63]">/10</span></div><div className="text-xs font-semibold text-[#756f63] mt-1">{fmtN(bd.total)}/{fmtN(bd.totalMax)} · {pct}%</div></div>
+                                    <div className="text-right"><div className={"text-4xl font-extrabold "+(passed?"text-[#7fb088]":"text-[#c0392b]")}>{voto}</div><div className="text-xs font-semibold text-[#756f63] mt-1">{fmtN(bd.total)}/{fmtN(bd.totalMax)} · {pct}%</div></div>
                                 </div>
                                 <div className="flex flex-wrap gap-2 mt-3 text-xs font-semibold">
                                     {hasClosed?<span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Chiuse {fmtN(bd.closedScore)}/{fmtN(bd.closedMax)}</span>:null}
@@ -1427,7 +1459,6 @@
                                     <div key={q.id} className={"bg-white p-5 rounded-2xl shadow-sm border-l-8 mb-4 "+border}>
                                         <div className="flex justify-between items-center mb-2"><span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda {i+1}</span><span className={"text-xs font-bold px-2 py-1 rounded "+badge}>{btxt}</span></div>
                                         <p className="font-bold text-[#2e2e2e] mb-3 leading-relaxed">{q.question}</p>
-                                        {(q.rubric&&isOpen)?<div className="text-xs text-[#756f63] bg-[#f7dd73]/15 rounded-lg p-3 mb-3 leading-relaxed"><b>Griglia di valutazione:</b> {q.rubric}</div>:null}
                                         <QView q={q} s={s} />
                                         {(!isOpen&&q.explanation)?<div className="mt-4 pt-3 border-t border-gray-100"><div className="text-xs font-bold text-[#34495e] uppercase mb-1">Spiegazione</div><p className="text-sm text-[#756f63] leading-relaxed">{q.explanation}</p></div>:null}
                                     </div>
@@ -1448,7 +1479,7 @@
                                     <thead className="bg-gray-50 text-[#756f63] text-xs uppercase"><tr><th className="px-4 py-3">PIN</th><th className="px-4 py-3">Studente</th><th className="px-4 py-3 text-center">Chiuse</th><th className="px-4 py-3 text-center">Aperte</th><th className="px-4 py-3 text-center">Totale</th><th className="px-4 py-3 text-center">%</th><th className="px-4 py-3 text-center">Voto</th><th></th></tr></thead>
                                     <tbody>
                                         {students.map(function(s){
-                                            var bd=breakdown(s); var pct=bd.totalMax?Math.round(bd.percent):0; var voto=bd.totalMax?(bd.total/bd.totalMax*10):0; var hasOpen=bd.openMax>0;
+                                            var bd=breakdown(s); var pct=bd.totalMax?Math.round(bd.percent):0; var voto=votoFromPercent(bd.percent); var hasOpen=bd.openMax>0;
                                             return (
                                                 <tr key={s.pin} onClick={function(){setSel(s.pin);}} className="border-t border-gray-100 hover:bg-gray-50 cursor-pointer">
                                                     <td className="px-4 py-3 font-mono font-bold text-[#34495e]">{s.pin}</td>
@@ -1457,7 +1488,7 @@
                                                     <td className="px-4 py-3 text-center font-semibold">{hasOpen?(fmtN(bd.openScore)+"/"+fmtN(bd.openMax)):"\u2014"}</td>
                                                     <td className="px-4 py-3 text-center font-extrabold text-[#34495e]">{fmtN(bd.total)+"/"+fmtN(bd.totalMax)}</td>
                                                     <td className={"px-4 py-3 text-center font-extrabold "+(pct>=SOGLIA?"text-[#7fb088]":"text-[#c0392b]")}>{pct+"%"}</td>
-                                                    <td className="px-4 py-3 text-center font-bold">{voto.toFixed(1)}</td>
+                                                    <td className="px-4 py-3 text-center font-bold">{voto}</td>
                                                     <td className="px-4 py-3 text-right text-gray-300">&rsaquo;</td>
                                                 </tr>
                                             );
