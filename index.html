@@ -114,68 +114,19 @@
 
         const buildOptionOrder = (questions) => {
             const order = {};
-            questions.forEach(q => {
-                if (q.type === 'single' || q.type === 'multi') {
-                    order[q.id] = shuffle(q.options.map((_, i) => i));
-                } else if (q.type === 'matching') {
-                    // Mescola la colonna di destra per gli abbinamenti
-                    order[q.id] = shuffle((q.pairs || []).map((_, i) => i));
-                }
+            questions.filter(q => q.type === 'single').forEach(q => {
+                order[q.id] = shuffle(q.options.map((_, i) => i));
             });
             return order;
         };
 
-        const calculatePointsForQuestion = (q, ans) => {
-            if (!ans || ans.selection === undefined) return 0;
-            const sel = ans.selection;
-
-            if (q.type === 'single') {
-                return sel === q.correctIndex ? q.points : 0;
-            } 
-            else if (q.type === 'multi') {
-                if (!Array.isArray(sel)) return 0;
-                const correctCount = sel.filter(i => q.correctIndices.includes(i)).length;
-                const wrongCount = sel.length - correctCount;
-                if (wrongCount === 0 && correctCount === 2) return 1.3;
-                if (wrongCount === 0 && correctCount === 1) return 0.5;
-                return 0;
-            }
-            else if (q.type === 'matching') {
-                if (typeof sel !== 'object') return 0;
-                let correctPairs = 0;
-                // Costruisce la mappa delle soluzioni anche in assenza di preprocessamento
-                const solMap = q.solutionMap || (q.pairs ? q.pairs.reduce((acc, p) => ({...acc, [p.item]: p.match}), {}) : {});
-                Object.keys(sel).forEach(k => {
-                    if (sel[k] === solMap[k]) correctPairs++;
-                });
-                if (correctPairs === 4) return 1.3;
-                if (correctPairs >= 2) return 0.5;
-                return 0;
-            }
-            return 0;
-        };
-
         const computeClosedScore = (student, questions) => {
             let s = 0;
-            questions.filter(q => q.type !== 'open').forEach(q => {
-                s += calculatePointsForQuestion(q, student.answers[q.id]);
+            questions.filter(q => q.type === 'single').forEach(q => {
+                const a = student.answers[q.id];
+                if (a && a.selection === q.correctIndex) s += q.points;
             });
-            return Math.round(s * 10) / 10;
-        };
-
-        const computeOpenScore = (student, questions) => {
-            let total = 0;
-            questions.filter(q => q.type === 'open').forEach(q => {
-                const ans = student.answers[q.id];
-                if (ans && ans.score != null) total += parseFloat(ans.score);
-            });
-            return Math.round(total * 10) / 10;
-        };
-
-        const isGraded = (student, questions) => {
-            const openQs = questions.filter(q => q.type === 'open');
-            if (openQs.length === 0) return true;
-            return openQs.every(q => student.answers[q.id] && student.answers[q.id].score != null);
+            return s;
         };
 
         const findStudent = (classes, pin) => {
@@ -187,6 +138,7 @@
             return null;
         };
 
+        // Scaricamento file robusto: la revoca ritardata evita che Firefox annulli il download.
         const downloadFile = (content, filename, mime) => {
             const blob = new Blob([content], { type: (mime || 'text/plain') + ';charset=utf-8' });
             const url = URL.createObjectURL(blob);
@@ -197,28 +149,21 @@
         };
         const oggiISO = () => new Date().toISOString().slice(0, 10);
 
-        const normalizzaStudente = (s) => {
-            const norm = {
-                pin: String(s.pin),
-                firstName: s.firstName || '', lastName: s.lastName || '',
-                status: s.status || 'idle',
-                answers: s.answers || {},
-                optionOrder: s.optionOrder || {},
-                closedScore: s.closedScore != null ? s.closedScore : null,
-                startedAt: s.startedAt != null ? s.startedAt : null,
-                submittedAt: s.submittedAt != null ? s.submittedAt : null
-            };
-            if (s.openAnswer) {
-                if (!norm.answers['q_open_migrated']) {
-                     norm.answers['q_open_migrated'] = { 
-                         selection: s.openAnswer, 
-                         score: s.openScore, 
-                         comment: s.openComment 
-                     };
-                }
-            }
-            return norm;
-        };
+        // Normalizza uno studente ripristinato da backup (compatibilita' con backup vecchi)
+        const normalizzaStudente = (s) => ({
+            pin: String(s.pin),
+            firstName: s.firstName || '', lastName: s.lastName || '',
+            status: s.status || 'idle',
+            answers: s.answers || {},
+            optionOrder: s.optionOrder || {},
+            openAnswer: s.openAnswer || '',
+            openScore: s.openScore != null ? s.openScore : null,
+            openComment: s.openComment || '',
+            closedScore: s.closedScore != null ? s.closedScore : null,
+            graded: s.graded != null ? s.graded : (s.openScore != null),
+            startedAt: s.startedAt != null ? s.startedAt : null,
+            submittedAt: s.submittedAt != null ? s.submittedAt : null
+        });
 
         /* =====================================================================
            ICONE
@@ -274,7 +219,7 @@
 
         const Modal = ({ children, onClose, maxW = "max-w-md" }) => (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm fade-in no-print" onClick={onClose}>
-                <div className={`w-full ${maxW} bg-white rounded-3xl shadow-lg p-7 bounce-in max-h-[90vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
+                <div className={`w-full ${maxW} bg-white rounded-3xl shadow-lg p-7 bounce-in`} onClick={e => e.stopPropagation()}>
                     {children}
                 </div>
             </div>
@@ -318,221 +263,16 @@
             );
         };
 
-        const MultiChoice = ({ q, answer, onAnswer, locked, reveal, order }) => {
-            const currentSel = answer?.selection || [];
-            const display = (order && order.length === q.options.length) ? order : q.options.map((_, i) => i);
-            
-            const toggle = (idx) => {
-                if (locked || reveal) return;
-                const newSel = currentSel.includes(idx) ? currentSel.filter(i => i !== idx) : [...currentSel, idx];
-                if (newSel.length <= 2) onAnswer(q.id, newSel);
-            };
-
-            return (
-                <div className="space-y-3">
-                    {!(locked || reveal) && <div className="text-xs text-[#756f63] font-bold uppercase tracking-wider mb-2">Seleziona esattamente 2 opzioni</div>}
-                    {display.map((origIdx) => {
-                        const opt = q.options[origIdx];
-                        const isSelected = currentSel.includes(origIdx);
-                        const isCorrectOption = q.correctIndices.includes(origIdx);
-                        
-                        let style = "bg-white border border-gray-200 text-[#2e2e2e]";
-                        let icon = null; 
-
-                        if (reveal) {
-                             if (isCorrectOption) {
-                                style = "bg-[#7fb088] text-white border-[#7fb088]";
-                                icon = "check";
-                             }
-                             else if (isSelected) {
-                                style = "bg-[#c0392b] text-white border-[#c0392b]";
-                                icon = "x";
-                             }
-                             else style = "bg-gray-50 text-gray-400 opacity-60";
-                        } else if (isSelected) {
-                            style = "bg-[#aed6f1] border-[#34495e] text-[#2e2e2e] shadow-md";
-                        }
-                        
-                        const interactive = !locked && !reveal;
-                        return (
-                            <div key={origIdx} onClick={() => toggle(origIdx)} 
-                                className={`p-4 rounded-xl shadow-sm transition-all flex justify-between items-center ${style} ${interactive ? 'cursor-pointer hover:border-[#34495e] hover:shadow-md' : 'cursor-default'}`}>
-                                <div className="flex items-center w-full">
-                                    <div className={`w-5 h-5 rounded-full border-2 mr-4 flex items-center justify-center flex-shrink-0 ${(isSelected || (reveal && isCorrectOption)) ? 'border-white/50' : 'border-gray-300'}`}>
-                                        {(isSelected || (reveal && isCorrectOption)) && 
-                                            <div className={`w-2.5 h-2.5 rounded-full ${reveal ? 'bg-white' : 'bg-[#34495e]'}`}></div>
-                                        }
-                                    </div>
-                                    <span className="font-medium text-sm md:text-base leading-snug">{opt}</span>
-                                </div>
-                                {icon && <div className="ml-2 p-1 rounded-full text-white"><Icon name={icon} size={20}/></div>}
-                            </div>
-                        );
-                    })}
-                </div>
-            );
-        };
-
-        const Matching = ({ q, answer, onAnswer, locked, reveal, order }) => {
-            const matches = answer?.selection || {}; 
-            const [selLeft, setSelLeft] = React.useState(null);
-
-            const pairColors = ['#7fb088', '#f7dd73', '#d2b4de', '#aed6f1']; 
-            const lightPairColors = ['#eaf5e9', '#fef9e3', '#f4ecf8', '#e8f4fc']; 
-
-            // Estrazione sicura dei dati (anche se caricati grezzi dal JSON)
-            const col1 = q.col1 || (q.pairs ? q.pairs.map(p => p.item) : []);
-            const originalCol2 = q.col2 || (q.pairs ? q.pairs.map(p => p.match) : []);
-            
-            // Applica il rimescolamento specifico per lo studente se disponibile
-            let col2 = originalCol2;
-            if (order && order.length === originalCol2.length) {
-                col2 = order.map(i => originalCol2[i]);
-            }
-
-            const solutionMap = q.solutionMap || (q.pairs ? q.pairs.reduce((acc, p) => ({...acc, [p.item]: p.match}), {}) : {});
-
-            const handleLeftClick = (item) => {
-                if (locked || reveal) return;
-                if (matches[item]) {
-                    const newM = { ...matches }; delete newM[item];
-                    onAnswer(q.id, newM);
-                } else setSelLeft(item);
-            };
-
-            const handleRightClick = (item) => {
-                if (locked || reveal) return;
-                const existingLeft = Object.keys(matches).find(key => matches[key] === item);
-                if (existingLeft) {
-                    const newM = { ...matches }; delete newM[existingLeft];
-                    onAnswer(q.id, newM);
-                } else if (selLeft) {
-                    const newM = { ...matches, [selLeft]: item };
-                    onAnswer(q.id, newM);
-                    setSelLeft(null);
-                }
-            };
-
-            const getPairIndex = (leftItem) => Object.keys(matches).indexOf(leftItem);
-            
-            const getStatusColor = (left, right) => {
-                if (!reveal) return null;
-                const isCorrect = solutionMap[left] === right;
-                return isCorrect 
-                    ? { border: '#7fb088', bg: '#eaf5e9', icon: 'check' } 
-                    : { border: '#c0392b', bg: '#fadbd8', icon: 'x' }; 
-            };
-
-            return (
-                <div className="space-y-6">
-                    {!(locked || reveal) && (
-                        <div className="text-xs text-[#756f63] font-bold uppercase tracking-wider">Clicca un elemento a sinistra e poi la sua descrizione a destra</div>
-                    )}
-                    <div className="grid grid-cols-2 gap-2 md:gap-6">
-                        <div className="space-y-3">
-                            {col1.map((item, idx) => {
-                                const rightMatch = matches[item];
-                                const isMatched = !!rightMatch;
-                                const isSelected = selLeft === item;
-                                const colorIdx = isMatched ? getPairIndex(item) : -1;
-                                
-                                let style = "bg-white border-gray-200 border-dashed text-gray-500";
-                                let statusStyles = null;
-
-                                if (reveal) {
-                                    if (isMatched) {
-                                        const status = getStatusColor(item, rightMatch);
-                                        style = `border-2 border-solid font-bold text-[#2e2e2e]`;
-                                        statusStyles = { borderColor: status.border, backgroundColor: status.bg };
-                                    } else style = "opacity-50";
-                                } else {
-                                    if (isSelected) style = "bg-[#34495e] text-white border-[#34495e] shadow-lg scale-105 border-solid border-2";
-                                    else if (isMatched) style = "text-[#2e2e2e] shadow-sm font-bold border-solid border-2";
-                                }
-
-                                const dynamicStyle = (!reveal && isMatched) 
-                                    ? { backgroundColor: lightPairColors[colorIdx % 4], borderColor: pairColors[colorIdx % 4] } 
-                                    : (statusStyles || {});
-
-                                return (
-                                    <div key={idx} onClick={() => handleLeftClick(item)} style={dynamicStyle}
-                                        className={`p-2 md:p-4 rounded-xl transition-all ${style} flex justify-center items-center text-center min-h-[80px] ${(locked || reveal) ? 'cursor-default' : 'cursor-pointer'}`}>
-                                        <span className="text-xs md:text-sm leading-tight">{item}</span>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                        <div className="space-y-3">
-                            {col2.map((item, idx) => {
-                                const leftOwner = Object.keys(matches).find(k => matches[k] === item);
-                                const colorIdx = leftOwner ? getPairIndex(leftOwner) : -1;
-                                
-                                let style = "bg-white border-gray-200 border-dashed text-gray-500";
-                                let statusStyles = null;
-                                let statusIcon = null;
-
-                                if (reveal) {
-                                    if (leftOwner) {
-                                        const status = getStatusColor(leftOwner, item);
-                                        style = `border-2 border-solid font-bold text-[#2e2e2e]`;
-                                        statusStyles = { borderColor: status.border, backgroundColor: status.bg };
-                                        statusIcon = status.icon;
-                                    } else style = "opacity-50";
-                                } else {
-                                    if (leftOwner) style = "text-[#2e2e2e] shadow-sm font-bold border-solid border-2";
-                                    else if (selLeft) style += " hover:bg-[#34495e]/10 hover:border-[#34495e]";
-                                }
-
-                                const dynamicStyle = (!reveal && leftOwner) 
-                                    ? { backgroundColor: lightPairColors[colorIdx % 4], borderColor: pairColors[colorIdx % 4] } 
-                                    : (statusStyles || {});
-
-                                return (
-                                    <div key={idx} onClick={() => handleRightClick(item)} style={dynamicStyle}
-                                        className={`p-2 md:p-4 rounded-xl transition-all ${style} flex flex-col justify-center items-center text-center min-h-[80px] relative ${(locked || reveal) ? 'cursor-default' : 'cursor-pointer'}`}>
-                                        <span className="text-xs md:text-sm leading-tight">{item}</span>
-                                        {reveal && statusIcon && (
-                                            <div className={`absolute top-1 right-1 p-0.5 rounded-full text-white ${statusIcon === 'check' ? 'bg-[#7fb088]' : 'bg-[#c0392b]'}`}>
-                                                <Icon name={statusIcon} size={10}/>
-                                            </div>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-                    {reveal && (
-                        <div className="mt-4 p-4 bg-white border-l-4 border-[#34495e] rounded shadow-sm">
-                            <h5 className="font-bold text-sm text-[#34495e] mb-2 uppercase tracking-wide">Soluzione Corretta</h5>
-                            <div className="grid grid-cols-1 gap-2">
-                                {Object.entries(solutionMap).map(([k, v], i) => (
-                                    <div key={i} className="flex flex-col md:flex-row md:items-center text-sm border-b md:border-b-0 border-gray-100 pb-2 md:pb-0 last:border-0">
-                                        <span className="font-bold text-[#2e2e2e] mb-1 md:mb-0">{k}</span>
-                                        <Icon name="check" size={16} className="hidden md:block mx-2 text-[#7fb088]"/>
-                                        <span className="md:hidden text-xs text-gray-400 mb-1">si abbina con:</span>
-                                        <span className="text-[#756f63]">{v}</span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-                </div>
-            );
-        };
-
         const OpenAnswer = ({ value, onChange, locked }) => (
             <div>
-                <textarea value={value || ""} disabled={locked} onChange={e => onChange(e.target.value)} onPaste={e => e.preventDefault()} onDrop={e => e.preventDefault()} rows={6} placeholder="Scrivi qui la tua risposta argomentata…"
+                <textarea value={value} disabled={locked} onChange={e => onChange(e.target.value)} onPaste={e => e.preventDefault()} onDrop={e => e.preventDefault()} rows={7} placeholder="Scrivi qui la tua risposta argomentata…"
                     className="w-full p-4 rounded-xl border-2 border-gray-200 focus:border-[#34495e] outline-none resize-none text-sm md:text-base leading-relaxed disabled:bg-gray-50" />
                 <div className="text-xs text-[#756f63] mt-2 flex items-center gap-1">
-                    <Icon name="alert" size={13}/> Incolla e trascinamento disattivati. Sintetizza il concetto.
+                    <Icon name="alert" size={13}/> Per questa domanda incolla e trascinamento sono disattivati.
                 </div>
             </div>
         );
 
-        /* =====================================================================
-           LOGIN E ACCESSO
-        ===================================================================== */
         const Landing = ({ onStudent, onAdmin }) => {
             const [pin, setPin] = useState("");
             const [err, setErr] = useState("");
@@ -596,25 +336,13 @@
         ===================================================================== */
         const ReviewExam = ({ student, cls, reveal, questions, maxClosed, maxOpen, maxTotal }) => {
             const closed = student.closedScore != null ? student.closedScore : computeClosedScore(student, questions);
-            const open = computeOpenScore(student, questions);
+            const open = student.openScore != null ? student.openScore : 0;
             const total = closed + open;
             const percent = Math.round((total / maxTotal) * 100);
             const passed = percent >= SOGLIA_SUFFICIENZA;
-            
-            // Calcola domande con una risposta valida inserita
-            const answeredCount = questions.filter(q => {
-                const ans = student.answers[q.id];
-                if (!ans) return false;
-                if (q.type === 'open') return !!ans.selection && String(ans.selection).trim().length > 0;
-                return ans.selection !== undefined;
-            }).length;
-
-            const closedQuestions = questions.filter(q => q.type !== 'open');
-            const openQuestions = questions.filter(q => q.type === 'open');
-
-            // Nuove variabili per le percentuali parziali
-            const closedPercent = maxClosed > 0 ? Math.round((closed / maxClosed) * 100) : 0;
-            const openPercent = maxOpen > 0 ? Math.round((open / maxOpen) * 100) : 0;
+            const answeredCount = questions.filter(q => student.answers[q.id]).length + (student.openAnswer ? 1 : 0);
+            const closedQuestions = questions.filter(q => q.type === 'single');
+            const openQuestion = questions.find(q => q.type === 'open');
 
             return (
                 <div>
@@ -626,7 +354,7 @@
                         {reveal ? (
                             <div className="text-right">
                                 <div className={`text-3xl font-extrabold tracking-tight ${passed ? 'text-[#7fb088]' : 'text-[#c0392b]'}`}>{percent}%</div>
-                                <div className="text-xs font-semibold text-[#756f63]">VOTO FINALE</div>
+                                <div className="text-xs font-semibold text-[#756f63]">{total}/{maxTotal} · {(total/maxTotal*10).toFixed(1)}/10</div>
                             </div>
                         ) : (
                             <div className="text-right">
@@ -638,42 +366,25 @@
 
                     {reveal && (
                         <div className="flex gap-2 mb-4 text-xs font-semibold">
-                            <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Chiuse: {closedPercent}%</span>
-                            <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Aperte: {openPercent}%</span>
+                            <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Chiuse: {closed}/{maxClosed}</span>
+                            <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Aperta: {open}/{maxOpen}</span>
                         </div>
                     )}
 
                     <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
                         {closedQuestions.map((q, i) => {
                             const a = student.answers[q.id];
-                            const answered = a && a.selection != null && (Array.isArray(a.selection) ? a.selection.length > 0 : (typeof a.selection === 'object' ? Object.keys(a.selection).length > 0 : true));
-                            const pts = calculatePointsForQuestion(q, a);
-                            
-                            let badgeClass = "bg-gray-200 text-gray-600";
-                            let badgeText = "IN BIANCO";
-                            let border = "border-gray-300";
-
-                            if (reveal) {
-                                if (!answered) { badgeText = "NON RISPOSTA"; }
-                                else if (Math.abs(pts - q.points) < 0.01) { badgeClass = "bg-[#7fb088]/10 text-[#7fb088]"; badgeText = "CORRETTA"; border = "border-[#7fb088]"; }
-                                else if (pts > 0) { badgeClass = "bg-[#f7dd73]/30 text-[#7a6310]"; badgeText = "PARZIALE"; border = "border-[#f7dd73]"; }
-                                else { badgeClass = "bg-[#c0392b]/10 text-[#c0392b]"; badgeText = "ERRATA"; border = "border-[#c0392b]"; }
-                            } else if (answered) {
-                                badgeClass = "bg-[#aed6f1]/40 text-[#34495e]"; badgeText = "RISPOSTA"; border = "border-[#34495e]";
-                            }
-
+                            const answered = a && a.selection != null;
+                            const ok = answered && a.selection === q.correctIndex;
+                            const border = !reveal ? (answered ? "border-[#34495e]" : "border-gray-300") : (answered ? (ok ? "border-[#7fb088]" : "border-[#c0392b]") : "border-gray-300");
                             return (
                                 <div key={q.id} className={`bg-white p-5 rounded-2xl shadow-sm border-l-8 ${border}`}>
                                     <div className="flex justify-between items-center mb-2">
                                         <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda {i+1}</span>
-                                        <span className={`text-xs font-bold px-2 py-1 rounded ${badgeClass}`}>{badgeText}</span>
+                                        <span className={`text-xs font-bold px-2 py-1 rounded ${reveal ? (answered ? (ok ? 'bg-[#7fb088]/10 text-[#7fb088]' : 'bg-[#c0392b]/10 text-[#c0392b]') : 'bg-gray-200 text-gray-600') : (answered ? 'bg-[#aed6f1]/40 text-[#34495e]' : 'bg-gray-200 text-gray-600')}`}>{reveal ? (answered ? (ok ? 'CORRETTA' : 'ERRATA') : 'NON RISPOSTA') : (answered ? 'RISPOSTA' : 'IN BIANCO')}</span>
                                     </div>
                                     <p className="font-bold text-[#2e2e2e] mb-3 leading-relaxed text-sm md:text-base">{q.question}</p>
-                                    
-                                    {q.type === 'single' && <SingleChoice q={q} answer={a} onAnswer={()=>{}} locked reveal={reveal} order={student.optionOrder?.[q.id]} />}
-                                    {q.type === 'multi' && <MultiChoice q={q} answer={a} onAnswer={()=>{}} locked reveal={reveal} order={student.optionOrder?.[q.id]} />}
-                                    {q.type === 'matching' && <Matching q={q} answer={a} onAnswer={()=>{}} locked reveal={reveal} order={student.optionOrder?.[q.id]} />}
-                                    
+                                    <SingleChoice q={q} answer={a} onAnswer={()=>{}} locked reveal={reveal} />
                                     {reveal && q.explanation && (
                                         <div className="mt-4 pt-3 border-t border-gray-100">
                                             <div className="text-xs font-bold text-[#34495e] uppercase mb-1">Spiegazione</div>
@@ -684,39 +395,40 @@
                             );
                         })}
 
-                        {openQuestions.map((q, idx) => {
-                            const a = student.answers[q.id];
-                            return (
-                                <div key={q.id} className="bg-white p-5 rounded-2xl shadow-sm border-l-8 border-[#34495e]">
-                                    <div className="flex justify-between items-center mb-2">
-                                        <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Aperta {idx+1}</span>
-                                        {reveal && <span className="text-xs font-bold px-2 py-1 rounded bg-gray-100 text-[#34495e]">{a?.score || 0}/{q.points} pt</span>}
-                                    </div>
-                                    <p className="font-bold text-[#2e2e2e] mb-3 leading-relaxed text-sm md:text-base">{q.question}</p>
-                                    <div className="bg-gray-50 rounded-xl p-4 text-sm text-[#2e2e2e] whitespace-pre-wrap leading-relaxed">{a?.selection || <span className="italic text-gray-400">Nessuna risposta fornita.</span>}</div>
-                                    {reveal && a?.comment && (
-                                        <div className="bg-[#aed6f1]/20 rounded-xl p-4 text-sm mt-3">
-                                            <div className="text-xs font-bold text-[#34495e] uppercase mb-1">Commento del docente</div>
-                                            <div className="text-[#2e2e2e] leading-relaxed">{a.comment}</div>
-                                        </div>
-                                    )}
+                        {openQuestion && (
+                            <div className="bg-white p-5 rounded-2xl shadow-sm border-l-8 border-[#34495e]">
+                                <div className="flex justify-between items-center mb-2">
+                                    <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda aperta</span>
+                                    {reveal && <span className="text-xs font-bold px-2 py-1 rounded bg-gray-100 text-[#34495e]">{open}/{maxOpen} pt</span>}
                                 </div>
-                            )
-                        })}
+                                <p className="font-bold text-[#2e2e2e] mb-3 leading-relaxed text-sm md:text-base">{openQuestion.question}</p>
+                                <div className="bg-gray-50 rounded-xl p-4 text-sm text-[#2e2e2e] whitespace-pre-wrap leading-relaxed">{student.openAnswer || <span className="italic text-gray-400">Nessuna risposta fornita.</span>}</div>
+                                {reveal && student.openComment && (
+                                    <div className="bg-[#aed6f1]/20 rounded-xl p-4 text-sm mt-3">
+                                        <div className="text-xs font-bold text-[#34495e] uppercase mb-1">Commento del docente</div>
+                                        <div className="text-[#2e2e2e] leading-relaxed">{student.openComment}</div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 </div>
             );
         };
 
-        /* =====================================================================
-           APP DELLO STUDENTE (SVOLGIMENTO DEL TEST)
-        ===================================================================== */
-        const StudentApp = ({ pin, cls, db, onSyncUpdate, maxClosed, maxOpen, maxTotal }) => {
+        const StudentApp = ({ pin, cls, db, onSyncUpdate }) => {
             const student = db.classes[cls]?.students[pin];
-            const questions = db.questions || [];
+            const questions = (db.classes[cls] && db.classes[cls].questions) || [];
+            const maxClosed = questions.filter(q => q.type === 'single').reduce((a, q) => a + q.points, 0);
+            const openQuestion = questions.find(q => q.type === 'open');
+            const maxOpen = openQuestion ? openQuestion.points : 0;
+            const maxTotal = maxClosed + maxOpen;
             const [idx, setIdx] = useState(0);
             const [confirmOpen, setConfirmOpen] = useState(false);
 
+            // Lo sblocco del docente concede UN solo rientro: appena lo studente è di nuovo
+            // "in corso" (sia rientrando col PIN, sia con la pagina che si riapre da sola)
+            // il permesso viene consumato. Se esce ancora, sarà di nuovo bloccato.
             useEffect(() => {
                 if (student && student.status === 'playing' && student.resumeAllowed) {
                     onSyncUpdate(cls, pin, { ...student, resumeAllowed: false });
@@ -730,6 +442,12 @@
                 onSyncUpdate(cls, pin, updatedStudent);
             };
             
+            const setOpen = (text) => {
+                if (student.status !== 'playing') return;
+                const updatedStudent = { ...student, openAnswer: text };
+                onSyncUpdate(cls, pin, updatedStudent);
+            };
+            
             const consegna = () => {
                 const updatedStudent = { ...student };
                 updatedStudent.status = 'submitted';
@@ -740,7 +458,11 @@
             };
 
             if (!student || questions.length === 0) {
-                return <div className="flex-grow flex items-center justify-center p-6 text-xl font-bold text-[#34495e]">Caricamento...</div>;
+                return (
+                    <div className="flex-grow flex flex-col items-center justify-center p-6 text-center">
+                        <div className="text-xl font-bold text-[#34495e]">Caricamento o nessuna prova attiva...</div>
+                    </div>
+                );
             }
 
             if (student.status === 'locked') {
@@ -779,16 +501,7 @@
 
             const q = questions[idx];
             const ans = student.answers[q.id];
-            
-            const answeredCount = questions.filter(cq => {
-                const a = student.answers[cq.id];
-                if (!a) return false;
-                if (cq.type === 'open') return !!a.selection && String(a.selection).trim().length > 0;
-                if (cq.type === 'single') return a.selection !== undefined;
-                if (cq.type === 'multi') return Array.isArray(a.selection) && a.selection.length > 0;
-                if (cq.type === 'matching') return typeof a.selection === 'object' && Object.keys(a.selection).length > 0;
-                return false;
-            }).length;
+            const answeredCount = questions.filter(cq => cq.type === 'open' ? !!student.openAnswer : !!student.answers[cq.id]).length;
 
             return (
                 <div className="flex-grow flex flex-col min-h-screen">
@@ -807,20 +520,10 @@
 
                     <div className="flex-grow w-full max-w-2xl mx-auto px-4 py-4 flex flex-col">
                         <div className="flex flex-wrap gap-1.5 justify-center mb-4">
-                            {questions.map((qq, i) => {
-                                const a = student.answers[qq.id];
-                                let isAnsw = false;
-                                if (a) {
-                                    if (qq.type === 'open') isAnsw = !!a.selection && String(a.selection).trim().length > 0;
-                                    else if (qq.type === 'multi') isAnsw = Array.isArray(a.selection) && a.selection.length > 0;
-                                    else if (qq.type === 'matching') isAnsw = typeof a.selection === 'object' && Object.keys(a.selection).length > 0;
-                                    else isAnsw = a.selection !== undefined;
-                                }
-                                return (
-                                    <button key={qq.id} onClick={() => setIdx(i)}
-                                        className={`w-3 h-3 rounded-full transition-all ${i === idx ? 'ring-2 ring-offset-1 ring-[#34495e] scale-125' : ''} ${isAnsw ? 'bg-[#34495e]' : 'bg-gray-300'}`} />
-                                )
-                            })}
+                            {questions.map((qq, i) => (
+                                <button key={qq.id} onClick={() => setIdx(i)}
+                                    className={`w-3 h-3 rounded-full transition-all ${i === idx ? 'ring-2 ring-offset-1 ring-[#34495e] scale-125' : ''} ${(qq.type === 'open' ? !!student.openAnswer : !!student.answers[qq.id]) ? 'bg-[#34495e]' : 'bg-gray-300'}`} />
+                            ))}
                         </div>
 
                         <div className="bg-white rounded-2xl shadow-card border border-gray-100 p-6 flex-grow fade-in" key={q.id}>
@@ -829,11 +532,7 @@
                                 <span className="text-xs font-bold text-[#34495e] bg-gray-100 px-2 py-1 rounded">{q.points} pt</span>
                             </div>
                             <p className="font-bold text-[#2e2e2e] text-lg mb-5 leading-relaxed">{q.question}</p>
-                            
-                            {q.type === 'single' && <SingleChoice q={q} answer={ans} onAnswer={answer} order={student.optionOrder?.[q.id]} />}
-                            {q.type === 'multi' && <MultiChoice q={q} answer={ans} onAnswer={answer} order={student.optionOrder?.[q.id]} />}
-                            {q.type === 'matching' && <Matching q={q} answer={ans} onAnswer={answer} order={student.optionOrder?.[q.id]} />}
-                            {q.type === 'open' && <OpenAnswer value={ans?.selection} onChange={(txt) => answer(q.id, txt)} />}
+                            {q.type === 'single' ? <SingleChoice q={q} answer={ans} onAnswer={answer} order={student.optionOrder?.[q.id]} /> : <OpenAnswer value={student.openAnswer} onChange={setOpen} />}
                         </div>
 
                         <div className="grid grid-cols-2 gap-3 mt-4">
@@ -862,9 +561,9 @@
         };
 
         /* =====================================================================
-           CRUSCOTTO DEL DOCENTE (ADMIN PANEL)
+           CRUSCOTTO DEL DOCENTE (ADMIN PANEL) E ARCHIVIO
         ===================================================================== */
-        const AdminApp = ({ db, onSyncUpdate, onResetDB, onExit, maxClosed, maxOpen, maxTotal }) => {
+        const AdminApp = ({ db, onSyncUpdate, onResetDB, onExit }) => {
             const classesList = Object.keys(db.classes || {});
             const [cls, setCls] = useState(classesList[0] || "");
             const [grading, setGrading] = useState(null);   
@@ -885,7 +584,11 @@
 
             const classData = db.classes[cls];
             const students = classData ? Object.values(classData.students).sort((a,b) => (a.lastName+a.firstName).localeCompare(b.lastName+b.firstName)) : [];
-            const questions = db.questions || [];
+            const questions = (classData && classData.questions) || [];
+            const maxClosed = questions.filter(q => q.type === 'single').reduce((a, q) => a + q.points, 0);
+            const openQuestion = questions.find(q => q.type === 'open');
+            const maxOpen = openQuestion ? openQuestion.points : 0;
+            const maxTotal = maxClosed + maxOpen;
 
             const handleUploadClasse = (e) => {
                 const file = e.target.files[0];
@@ -899,11 +602,13 @@
                         parsed.alunni.forEach(al => {
                             newStudents[al.pin] = {
                                 pin: String(al.pin), firstName: al.nome, lastName: al.cognome,
-                                status: 'idle', answers: {}, closedScore: null, startedAt: null, submittedAt: null
+                                status: 'idle', answers: {}, openAnswer: '', openScore: null,
+                                openComment: '', closedScore: null, graded: false, startedAt: null, submittedAt: null
                             };
                         });
-                        const updatedClasses = { ...db.classes, [parsed.classe]: { published: false, students: newStudents } };
-                        onSyncUpdate(null, null, null, updatedClasses, db.questions);
+                        const existing = db.classes[parsed.classe];
+                        const updatedClasses = { ...db.classes, [parsed.classe]: { published: false, students: newStudents, questions: (existing && existing.questions) || [] } };
+                        onSyncUpdate(null, null, null, updatedClasses);
                         setCls(parsed.classe);
                         alert(`Classe ${parsed.classe} caricata correttamente!`);
                     } catch (err) { alert("Errore nel file JSON della classe."); }
@@ -915,13 +620,15 @@
             const handleUploadProva = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
+                if (!cls || !classData) { alert("Seleziona prima la classe a cui vuoi abbinare questa verifica."); e.target.value = ""; return; }
                 const reader = new FileReader();
                 reader.onload = () => {
                     try {
                         const parsed = JSON.parse(reader.result);
                         if (!Array.isArray(parsed)) throw new Error("Array atteso.");
-                        onSyncUpdate(null, null, null, db.classes, parsed);
-                        alert("Quesiti d'esame caricati e pronti via cloud!");
+                        const updatedClasses = { ...db.classes, [cls]: { ...classData, questions: parsed } };
+                        onSyncUpdate(null, null, null, updatedClasses);
+                        alert(`Verifica abbinata alla classe ${cls} (${parsed.length} domande).`);
                     } catch (err) { alert("Errore nel file JSON dei quesiti."); }
                 };
                 reader.readAsText(file);
@@ -936,15 +643,15 @@
                 onSyncUpdate(cls, pin, st);
             };
 
-            const saveGrade = (pin, updatedAnswers) => {
-                const st = { ...classData.students[pin], answers: updatedAnswers };
+            const saveGrade = (pin, score, comment) => {
+                const st = { ...classData.students[pin], openScore: score, openComment: comment, graded: true };
                 if (st.closedScore == null) st.closedScore = computeClosedScore(st, questions);
                 onSyncUpdate(cls, pin, st);
                 setGrading(null);
             };
 
             const requestGrade = (s) => {
-                if (isGraded(s, questions)) { setReopenPin(s.pin); setReopenPw(""); setReopenErr(false); }
+                if (s.graded) { setReopenPin(s.pin); setReopenPw(""); setReopenErr(false); }
                 else setGrading(s.pin);
             };
             
@@ -961,8 +668,8 @@
                         updatedStudents[p].status = 'published';
                     }
                 });
-                const updatedClasses = { ...db.classes, [cls]: { published: true, students: updatedStudents } };
-                onSyncUpdate(null, null, null, updatedClasses, db.questions);
+                const updatedClasses = { ...db.classes, [cls]: { ...classData, published: true, students: updatedStudents } };
+                onSyncUpdate(null, null, null, updatedClasses);
                 setPubOpen(false);
             };
 
@@ -971,26 +678,31 @@
             const exportArchive = () => {
                 if (!classData) { alert("Seleziona prima una classe."); return; }
                 const svolta = Object.values(classData.students).filter(s => s.status === 'submitted' || s.status === 'published');
-                if (svolta.length === 0) { alert("Nessun alunno ha ancora svolto la verifica in questa classe."); return; }
+                if (svolta.length === 0) { alert("Nessun alunno ha ancora svolto la verifica in questa classe: non c'e' niente da archiviare."); return; }
                 if (questions.length === 0) { alert("Nessuna verifica caricata: impossibile generare l'archivio."); return; }
                 const html = buildArchiveHTML(cls, classData, questions, maxClosed, maxOpen, maxTotal);
                 downloadFile(html, 'archivio_' + cls + '_' + oggiISO() + '.html', 'text/html');
             };
 
+            // BACKUP della singola classe (stesso formato dei backup gia' in uso, con in piu' i quesiti)
             const exportBackup = () => {
                 if (!classData) { alert("Seleziona prima una classe."); return; }
                 const payload = {
-                    app: 'verifiche-arte-bianca', exportedAt: new Date().toISOString(),
-                    classe: cls, dati: { published: !!classData.published, students: classData.students },
+                    app: 'verifiche-arte-bianca',
+                    exportedAt: new Date().toISOString(),
+                    classe: cls,
+                    dati: { published: !!classData.published, students: classData.students },
                     quesiti: questions
                 };
                 downloadFile(JSON.stringify(payload, null, 2), 'backup_' + cls + '_' + oggiISO() + '.json', 'application/json');
             };
 
+            // BACKUP completo (tutte le classi, ciascuna con la sua verifica): usato anche prima del reset totale
             const exportFullBackup = () => {
                 const payload = {
-                    app: 'verifiche-arte-bianca', full: true, exportedAt: new Date().toISOString(),
-                    classes: db.classes, questions: questions
+                    app: 'verifiche-arte-bianca', full: true,
+                    exportedAt: new Date().toISOString(),
+                    classes: db.classes
                 };
                 downloadFile(JSON.stringify(payload, null, 2), 'backup_completo_' + oggiISO() + '.json', 'application/json');
             };
@@ -1002,28 +714,31 @@
                 reader.onload = () => {
                     try {
                         const parsed = JSON.parse(reader.result);
+                        // Backup di singola classe
                         if (parsed.classe && parsed.dati && parsed.dati.students) {
                             const studentsNorm = {};
                             Object.values(parsed.dati.students).forEach(s => { studentsNorm[String(s.pin)] = normalizzaStudente(s); });
-                            const updatedClasses = { ...db.classes, [parsed.classe]: { published: !!parsed.dati.published, students: studentsNorm } };
-                            const newQuestions = (Array.isArray(parsed.quesiti) && parsed.quesiti.length) ? parsed.quesiti : db.questions;
-                            onSyncUpdate(null, null, null, updatedClasses, newQuestions);
+                            const quesitiClasse = (Array.isArray(parsed.quesiti) && parsed.quesiti.length) ? parsed.quesiti : ((db.classes[parsed.classe] && db.classes[parsed.classe].questions) || []);
+                            const updatedClasses = { ...db.classes, [parsed.classe]: { published: !!parsed.dati.published, students: studentsNorm, questions: quesitiClasse } };
+                            onSyncUpdate(null, null, null, updatedClasses);
                             setCls(parsed.classe);
-                            alert("Backup ripristinato!");
+                            alert("Backup della classe " + parsed.classe + " ripristinato" + ((Array.isArray(parsed.quesiti) && parsed.quesiti.length) ? " (insieme alla verifica abbinata)." : "."));
+                        // Backup completo
                         } else if (parsed.classes) {
                             const restored = {};
                             Object.keys(parsed.classes).forEach(c => {
                                 const studentsNorm = {};
                                 Object.values(parsed.classes[c].students || {}).forEach(s => { studentsNorm[String(s.pin)] = normalizzaStudente(s); });
-                                restored[c] = { published: !!parsed.classes[c].published, students: studentsNorm };
+                                restored[c] = { published: !!parsed.classes[c].published, students: studentsNorm, questions: (parsed.classes[c].questions || (Array.isArray(parsed.questions) ? parsed.questions : [])) };
                             });
-                            const newQuestions = (Array.isArray(parsed.questions) && parsed.questions.length) ? parsed.questions : db.questions;
-                            onSyncUpdate(null, null, null, restored, newQuestions);
+                            onSyncUpdate(null, null, null, restored);
                             const primo = Object.keys(restored)[0];
                             if (primo) setCls(primo);
-                            alert("Backup completo ripristinato.");
+                            alert("Backup completo ripristinato (" + Object.keys(restored).length + " classi).");
+                        } else {
+                            alert("Questo file non sembra un backup valido dell'applicazione.");
                         }
-                    } catch (err) { alert("Errore lettura file di backup."); }
+                    } catch (err) { alert("Errore nella lettura del file di backup."); }
                 };
                 reader.readAsText(file);
                 e.target.value = "";
@@ -1031,14 +746,15 @@
 
             const doReset = () => {
                 if (!cls || !db.classes[cls]) { setResetOpen(false); setResetText(""); return; }
-                exportBackup();
+                exportBackup();                // sicurezza: scarica il backup di QUESTA classe prima di rimuoverla
                 const updated = { ...db.classes };
-                delete updated[cls];
-                onSyncUpdate(null, null, null, updated, db.questions);
+                delete updated[cls];           // rimuovo solo la classe selezionata (con la sua verifica); le altre restano intatte
+                onSyncUpdate(null, null, null, updated);
                 const rimaste = Object.keys(updated);
                 setCls(rimaste[0] || "");
-                setResetOpen(false); setResetText("");
-                alert("Classe " + cls + " rimossa dal cloud.");
+                setResetOpen(false);
+                setResetText("");
+                alert("Classe " + cls + " rimossa dal cloud (backup scaricato). Le altre classi restano attive.");
             };
             
             useEffect(() => {
@@ -1126,7 +842,7 @@
                                                     <th className="px-4 py-3 font-bold">Studente</th>
                                                     <th className="px-4 py-3 font-bold">Stato</th>
                                                     <th className="px-4 py-3 font-bold text-center">Chiuse</th>
-                                                    <th className="px-4 py-3 font-bold text-center">Aperte</th>
+                                                    <th className="px-4 py-3 font-bold text-center">Aperta</th>
                                                     <th className="px-4 py-3 font-bold text-center">Totale</th>
                                                     <th className="px-4 py-3 font-bold text-right">Azioni</th>
                                                 </tr>
@@ -1136,25 +852,10 @@
                                                     const submitted = s.status === 'submitted' || s.status === 'published';
                                                     const playing = s.status === 'playing';
                                                     const locked = s.status === 'locked';
-                                                    
-                                                    const answeredCount = questions.filter(q => {
-                                                        const a = s.answers[q.id];
-                                                        if (!a) return false;
-                                                        if (q.type === 'open') return !!a.selection && String(a.selection).trim().length > 0;
-                                                        return a.selection !== undefined;
-                                                    }).length;
-
+                                                    const answeredCount = questions.filter(q => s.answers[q.id]).length + (s.openAnswer ? 1 : 0);
                                                     const closed = s.closedScore != null ? s.closedScore : (submitted ? computeClosedScore(s, questions) : null);
-                                                    const openScore = submitted ? computeOpenScore(s, questions) : 0;
-                                                    const tot = submitted ? (closed + openScore) : null;
+                                                    const tot = submitted ? (closed + (s.openScore||0)) : null;
                                                     const canView = submitted || playing;
-                                                    const sGraded = isGraded(s, questions);
-
-                                                    // Calcolo percentuali per la tabella Admin
-                                                    const closedPercent = submitted && maxClosed > 0 ? Math.round((closed / maxClosed) * 100) : null;
-                                                    const openPercent = submitted && sGraded && maxOpen > 0 ? Math.round((openScore / maxOpen) * 100) : null;
-                                                    const totPercent = submitted && sGraded && maxTotal > 0 ? Math.round((tot / maxTotal) * 100) : null;
-
                                                     return (
                                                         <tr key={s.pin} className="border-t border-gray-100 hover:bg-gray-50/60">
                                                             <td className="px-4 py-3 font-mono font-bold text-[#34495e]">{s.pin}</td>
@@ -1165,14 +866,14 @@
                                                                     {playing && <span className="text-xs font-bold text-[#34495e]">{answeredCount}/{questions.length}</span>}
                                                                 </div>
                                                             </td>
-                                                            <td className="px-4 py-3 text-center font-semibold text-[#34495e]">{closedPercent != null ? `${closedPercent}%` : '—'}</td>
-                                                            <td className="px-4 py-3 text-center font-semibold">{submitted ? (sGraded ? `${openPercent}%` : <span className="text-[#c0392b]">da valutare</span>) : '—'}</td>
-                                                            <td className="px-4 py-3 text-center">{totPercent != null ? <span className="inline-flex items-center gap-1 font-extrabold text-[#34495e]">{totPercent}%{sGraded && <Icon name="lock" size={12} className="text-[#7fb088]" />}</span> : <span className="text-gray-400">—</span>}</td>
+                                                            <td className="px-4 py-3 text-center font-semibold text-[#34495e]">{closed != null ? `${closed}/${maxClosed}` : '—'}</td>
+                                                            <td className="px-4 py-3 text-center font-semibold">{submitted ? (s.openScore != null ? `${s.openScore}/${maxOpen}` : <span className="text-[#c0392b]">da valutare</span>) : '—'}</td>
+                                                            <td className="px-4 py-3 text-center">{tot != null ? <span className="inline-flex items-center gap-1 font-extrabold text-[#34495e]">{tot}/{maxTotal}{s.graded && <Icon name="lock" size={12} className="text-[#7fb088]" />}</span> : <span className="text-gray-400">—</span>}</td>
                                                             <td className="px-4 py-3">
                                                                 <div className="flex justify-end gap-1.5 flex-wrap">
                                                                     {locked && <button onClick={() => sblocca(s.pin)} className="bg-[#aed6f1]/30 text-[#34495e] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-[#aed6f1]/60"><Icon name="unlock" size={14}/> Sblocca</button>}
                                                                     {canView && <button onClick={() => setViewPin(s.pin)} className="bg-gray-100 text-[#34495e] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-gray-200"><Icon name="eye" size={14}/> Sfoglia</button>}
-                                                                    {submitted && <button onClick={() => requestGrade(s)} className={`rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 ${sGraded ? 'bg-[#7fb088]/15 text-[#4c7a55] hover:bg-[#7fb088]/30' : 'bg-[#f7dd73]/30 text-[#7a6310] hover:bg-[#f7dd73]/60'}`}><Icon name={sGraded ? 'lock' : 'edit'} size={14}/> {sGraded ? 'Rivaluta' : 'Valuta'}</button>}
+                                                                    {submitted && <button onClick={() => requestGrade(s)} className={`rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 ${s.graded ? 'bg-[#7fb088]/15 text-[#4c7a55] hover:bg-[#7fb088]/30' : 'bg-[#f7dd73]/30 text-[#7a6310] hover:bg-[#f7dd73]/60'}`}><Icon name={s.graded ? 'lock' : 'edit'} size={14}/> {s.graded ? 'Rivaluta' : 'Valuta'}</button>}
                                                                 </div>
                                                             </td>
                                                         </tr>
@@ -1187,8 +888,8 @@
                     </div>
 
                     {gradingStudent && (
-                        <Modal onClose={() => setGrading(null)} maxW="max-w-3xl">
-                            <GradingForm student={gradingStudent} questions={questions} onSave={saveGrade} onClose={() => setGrading(null)} />
+                        <Modal onClose={() => setGrading(null)} maxW="max-w-2xl">
+                            <GradingForm student={gradingStudent} questions={questions} maxOpen={maxOpen} onSave={saveGrade} onClose={() => setGrading(null)} />
                         </Modal>
                     )}
 
@@ -1231,7 +932,7 @@
                         <Modal onClose={() => { setResetOpen(false); setResetText(""); }}>
                             <div className="text-center">
                                 <h3 className="text-xl font-extrabold text-[#c0392b]">Reset della classe {cls}</h3>
-                                <p className="text-sm text-[#756f63] mt-2 mb-4">Questa operazione rimuove dal cloud <b>solo la classe {cls}</b>. Prima della rimozione viene scaricato in automatico un backup. Scrivi <span className="font-mono bg-gray-100 px-2 py-0.5 rounded text-[#c0392b]">RESET</span> per confermare.</p>
+                                <p className="text-sm text-[#756f63] mt-2 mb-4">Questa operazione rimuove dal cloud <b>solo la classe {cls}</b> (alunni, risposte e correzioni); tutte le altre classi restano intatte. Prima della rimozione viene scaricato in automatico un backup di questa classe. Scrivi <span className="font-mono bg-gray-100 px-2 py-0.5 rounded text-[#c0392b]">RESET</span> per confermare.</p>
                                 <input value={resetText} onChange={e => setResetText(e.target.value)} placeholder="RESET" className="w-full text-center text-lg font-bold py-3 rounded-xl border-2 border-gray-200 focus:border-[#c0392b] outline-none mb-4"/>
                                 <div className="grid grid-cols-2 gap-3">
                                     <button onClick={() => { setResetOpen(false); setResetText(""); }} className="py-3 rounded-xl font-bold border-2 border-[#34495e] text-[#34495e] hover:bg-gray-50">Annulla</button>
@@ -1246,75 +947,42 @@
             );
         };
 
-        const GradingForm = ({ student, questions, onSave, onClose }) => {
-            const openQuestions = questions.filter(q => q.type === 'open');
-            const [grades, setGrades] = useState(() => {
-                const initial = {};
-                openQuestions.forEach(q => {
-                    const a = student.answers[q.id];
-                    initial[q.id] = { score: a?.score != null ? parseFloat(a.score) : 0, comment: a?.comment || "" };
-                });
-                return initial;
-            });
-
-            const handleSave = () => {
-                const updatedAnswers = { ...student.answers };
-                openQuestions.forEach(q => {
-                    if (!updatedAnswers[q.id]) updatedAnswers[q.id] = {};
-                    updatedAnswers[q.id].score = grades[q.id].score;
-                    updatedAnswers[q.id].comment = grades[q.id].comment;
-                });
-                onSave(student.pin, updatedAnswers);
-            };
-
-            if (openQuestions.length === 0) return <div className="p-4 text-center">Nessuna domanda aperta in questa verifica.</div>;
+        const GradingForm = ({ student, questions, maxOpen, onSave, onClose }) => {
+            const [score, setScore] = useState(student.openScore != null ? student.openScore : 0);
+            const [comment, setComment] = useState(student.openComment || "");
+            const openQuestion = questions.find(q => q.type === 'open');
 
             return (
                 <div>
                     <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-xl font-extrabold text-[#34495e]">Valutazione Risposte Aperte</h3>
+                        <h3 className="text-xl font-extrabold text-[#34495e]">Valutazione Risposta Aperta</h3>
                         <button onClick={onClose} className="text-gray-400 hover:text-[#34495e]"><Icon name="x" size={22}/></button>
                     </div>
+                    <p className="font-bold text-[#2e2e2e] mb-2 leading-relaxed text-sm">{openQuestion?.question}</p>
+                    {openQuestion?.rubric && <div className="text-xs text-[#756f63] bg-[#f7dd73]/15 rounded-lg p-3 mb-4 leading-relaxed"><b>Criteri di valutazione:</b> {openQuestion.rubric}</div>}
 
-                    <div className="space-y-6 max-h-[60vh] overflow-y-auto pr-2 pb-4">
-                        {openQuestions.map((q, idx) => {
-                            const currentGrade = grades[q.id];
-                            return (
-                                <div key={q.id} className="border border-gray-200 rounded-2xl p-5 bg-white shadow-sm">
-                                    <div className="flex items-center justify-between mb-2">
-                                        <div className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda {idx + 1} di {openQuestions.length}</div>
-                                        <div className="text-xs font-bold bg-gray-100 text-[#34495e] px-2 py-1 rounded">Max {q.points} pt</div>
-                                    </div>
-                                    <p className="font-bold text-[#2e2e2e] mb-2 leading-relaxed text-sm">{q.question}</p>
-                                    {q.rubric && <div className="text-xs text-[#756f63] bg-[#f7dd73]/15 rounded-lg p-3 mb-4 leading-relaxed"><b>Criteri:</b> {q.rubric}</div>}
-
-                                    <div className="bg-gray-50 rounded-xl p-4 text-sm text-[#2e2e2e] whitespace-pre-wrap leading-relaxed mb-4 border">
-                                        {student.answers[q.id]?.selection || <span className="italic text-gray-400">Nessun testo presente.</span>}
-                                    </div>
-
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div>
-                                            <div className="text-xs font-bold text-[#34495e] uppercase mb-2">Punteggio Decimali</div>
-                                            <div className="flex items-center gap-2">
-                                                <input type="number" step="0.1" min="0" max={q.points} value={currentGrade.score} 
-                                                    onChange={e => setGrades(prev => ({...prev, [q.id]: {...prev[q.id], score: parseFloat(e.target.value) || 0}}))}
-                                                    className="w-24 text-center font-extrabold py-2 border-2 border-gray-200 rounded-lg focus:border-[#34495e] outline-none" />
-                                                <span className="text-sm font-semibold text-gray-400">su {q.points}</span>
-                                            </div>
-                                        </div>
-                                        <div>
-                                            <div className="text-xs font-bold text-[#34495e] uppercase mb-2">Note / Commento</div>
-                                            <textarea value={currentGrade.comment} onChange={e => setGrades(prev => ({...prev, [q.id]: {...prev[q.id], comment: e.target.value}}))} rows={2} placeholder="Note di correzione..." className="w-full p-3 rounded-xl border-2 border-gray-200 focus:border-[#34495e] outline-none resize-none text-sm"/>
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })}
+                    <div className="bg-gray-50 rounded-xl p-4 text-sm text-[#2e2e2e] whitespace-pre-wrap leading-relaxed mb-4 max-h-40 overflow-y-auto border">
+                        {student.openAnswer || <span className="italic text-gray-400">Nessun testo presente.</span>}
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3 mt-5 pt-4 border-t border-gray-100">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <div className="text-xs font-bold text-[#34495e] uppercase mb-2">Punteggio (0–{maxOpen})</div>
+                            <div className="flex flex-wrap gap-1.5">
+                                {Array.from({ length: maxOpen + 1 }, (_, i) => i).map(n => (
+                                    <button key={n} onClick={() => setScore(n)} className={`w-9 h-9 rounded-xl font-extrabold transition-all ${score===n ? 'bg-[#34495e] text-white shadow-md' : 'bg-gray-100 text-[#34495e] hover:bg-gray-200'}`}>{n}</button>
+                                ))}
+                            </div>
+                        </div>
+                        <div>
+                            <div className="text-xs font-bold text-[#34495e] uppercase mb-2">Note / Commento feedback</div>
+                            <textarea value={comment} onChange={e => setComment(e.target.value)} rows={3} placeholder="Note di correzione..." className="w-full p-3 rounded-xl border-2 border-gray-200 focus:border-[#34495e] outline-none resize-none text-sm"/>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 mt-5">
                         <button onClick={onClose} className="py-3 rounded-xl font-bold border-2 border-[#34495e] text-[#34495e] hover:bg-gray-50">Annulla</button>
-                        <button onClick={handleSave} className="py-3 rounded-xl font-bold bg-[#34495e] text-white hover:bg-[#2c3e50]">Registra Voti</button>
+                        <button onClick={() => onSave(student.pin, score, comment)} className="py-3 rounded-xl font-bold bg-[#34495e] text-white hover:bg-[#2c3e50]">Registra Voto</button>
                     </div>
                 </div>
             );
@@ -1324,22 +992,17 @@
             const students = Object.values(classData.students)
                 .filter(s => s.status === 'submitted' || s.status === 'published')
                 .sort((a,b) => (a.lastName+a.firstName).localeCompare(b.lastName+b.firstName));
-            const closedQuestions = questions.filter(q => q.type !== 'open');
-            const openQuestions = questions.filter(q => q.type === 'open');
+            const closedQuestions = questions.filter(q => q.type === 'single');
+            const openQuestion = questions.find(q => q.type === 'open');
 
             const content = (
                 <div style={{ fontFamily: 'Cabin, sans-serif', color: '#2e2e2e' }}>
                     {students.length === 0 && <div style={{ padding: 20 }}>Nessuna prova consegnata disponibile per la stampa.</div>}
                     {students.map(s => {
                         const closed = s.closedScore != null ? s.closedScore : computeClosedScore(s, questions);
-                        const open = computeOpenScore(s, questions);
+                        const open = s.openScore != null ? s.openScore : 0;
                         const tot = closed + open;
                         const percent = Math.round(tot / maxTotal * 100);
-                        
-                        // Percentuali per stampa
-                        const closedPercent = maxClosed > 0 ? Math.round((closed / maxClosed) * 100) : 0;
-                        const openPercent = maxOpen > 0 ? Math.round((open / maxOpen) * 100) : 0;
-
                         return (
                             <div key={s.pin} className="print-student" style={{ padding: '4mm 0' }}>
                                 <div style={{ borderBottom: '3px solid #34495e', paddingBottom: 8, marginBottom: 14 }}>
@@ -1349,53 +1012,32 @@
                                         <div style={{ fontWeight: 700 }}>Classe {cls} · PIN {s.pin}</div>
                                     </div>
                                     <div style={{ marginTop: 6, fontWeight: 700 }}>
-                                        VOTO FINALE: {percent}% — Chiuse {closedPercent}%, Aperte {openPercent}%
+                                        Punteggio: {tot}/{maxTotal} ({percent}%) — Risposte Chiuse {closed}/{maxClosed}, Aperta {open}/{maxOpen} — Voto {(tot/maxTotal*10).toFixed(1)}/10
                                     </div>
                                 </div>
 
                                 {closedQuestions.map((q, i) => {
                                     const a = s.answers[q.id];
                                     const sel = a ? a.selection : null;
-                                    const pts = calculatePointsForQuestion(q, a);
-                                    const ok = Math.abs(pts - q.points) < 0.01;
-                                    const parz = !ok && pts > 0;
+                                    const ok = sel === q.correctIndex;
                                     return (
                                         <div key={q.id} className="print-q" style={{ marginBottom: 10, fontSize: 12 }}>
-                                            <div style={{ fontWeight: 700 }}>{i+1}. {q.question} <span style={{ color: ok ? '#7fb088' : (parz ? '#e0a85c' : '#c0392b'), fontWeight: 800 }}>[{ok ? 'OK' : (parz ? 'PARZ' : (sel==null ? 'n.r.' : 'X'))}]</span></div>
+                                            <div style={{ fontWeight: 700 }}>{i+1}. {q.question} <span style={{ color: ok ? '#7fb088' : '#c0392b', fontWeight: 800 }}>[{ok ? 'OK' : (sel==null ? 'n.r.' : 'X')}]</span></div>
                                             <div style={{ marginLeft: 12 }}>
-                                                {q.type === 'single' && (
-                                                    <>
-                                                        <div>Scelta: {sel != null ? q.options[sel] : <i>Non risposta</i>}</div>
-                                                        {!ok && <div style={{ color: '#34495e' }}>Corretta: {q.options[q.correctIndex]}</div>}
-                                                    </>
-                                                )}
-                                                {q.type === 'multi' && (
-                                                    <>
-                                                        <div>Scelte: {Array.isArray(sel) && sel.length > 0 ? sel.map(idx => q.options[idx]).join(' | ') : <i>Non risposta</i>}</div>
-                                                        {!ok && <div style={{ color: '#34495e' }}>Corrette: {q.correctIndices.map(idx => q.options[idx]).join(' | ')}</div>}
-                                                    </>
-                                                )}
-                                                {q.type === 'matching' && (
-                                                    <>
-                                                        <div>Abbinamenti studente:</div>
-                                                        {typeof sel === 'object' && Object.keys(sel).length > 0 ? Object.entries(sel).map(([k,v]) => <div key={k}>- {k} &rarr; {v}</div>) : <i>Non risposta</i>}
-                                                    </>
-                                                )}
+                                                <div>Scelta dello studente: {sel != null ? q.options[sel] : <i>Non risposta</i>}</div>
+                                                {!ok && <div style={{ color: '#34495e' }}>Corretta: {q.options[q.correctIndex]}</div>}
                                             </div>
                                         </div>
                                     );
                                 })}
 
-                                {openQuestions.map((q, i) => {
-                                    const a = s.answers[q.id];
-                                    return (
-                                        <div key={q.id} className="print-q" style={{ marginTop: 8, fontSize: 12 }}>
-                                            <div style={{ fontWeight: 700 }}>{closedQuestions.length + i + 1}. {q.question} <span style={{ fontWeight: 800, color: '#34495e' }}>[{a?.score || 0}/{q.points}]</span></div>
-                                            <div style={{ marginLeft: 12, whiteSpace: 'pre-wrap' }}>Risposta: {a?.selection || <i>Testo vuoto</i>}</div>
-                                            {a?.comment && <div style={{ marginLeft: 12, marginTop: 4, fontStyle: 'italic', color: '#34495e' }}>Nota docente: {a.comment}</div>}
-                                        </div>
-                                    )
-                                })}
+                                {openQuestion && (
+                                    <div className="print-q" style={{ marginTop: 8, fontSize: 12 }}>
+                                        <div style={{ fontWeight: 700 }}>{closedQuestions.length+1}. {openQuestion.question} <span style={{ fontWeight: 800, color: '#34495e' }}>[{open}/{maxOpen}]</span></div>
+                                        <div style={{ marginLeft: 12, whiteSpace: 'pre-wrap' }}>Risposta data: {s.openAnswer || <i>Testo vuoto</i>}</div>
+                                        {s.openComment && <div style={{ marginLeft: 12, marginTop: 4, fontStyle: 'italic', color: '#34495e' }}>Nota docente: {s.openComment}</div>}
+                                    </div>
+                                )}
                             </div>
                         );
                     })}
@@ -1405,6 +1047,7 @@
         };
 
         const buildArchiveHTML = (cls, classData, questions, maxClosed, maxOpen, maxTotal) => {
+            // Solo gli alunni che hanno effettivamente svolto la prova (gli assenti restano fuori)
             const studentsDone = {};
             Object.values(classData.students).forEach(s => {
                 if (s.status === 'submitted' || s.status === 'published') studentsDone[String(s.pin)] = s;
@@ -1416,50 +1059,21 @@
                 const { useState } = React;
                 const D = window.__ARCHIVE__;
                 const Q = D.questions;
-                const CLOSED = Q.filter(function(q){ return q.type !== 'open'; });
-                const OPEN = Q.filter(function(q){ return q.type === 'open'; });
-                
-                const calcPts = function(q, ans){
-                    if (!ans || ans.selection === undefined) return 0;
-                    const sel = ans.selection;
-                    if (q.type === 'single') return sel === q.correctIndex ? q.points : 0;
-                    if (q.type === 'multi') {
-                        if (!Array.isArray(sel)) return 0;
-                        const correctCount = sel.filter(function(i){ return q.correctIndices.includes(i); }).length;
-                        const wrongCount = sel.length - correctCount;
-                        if (wrongCount === 0 && correctCount === 2) return 1.3;
-                        if (wrongCount === 0 && correctCount === 1) return 0.5;
-                        return 0;
-                    }
-                    if (q.type === 'matching') {
-                        if (typeof sel !== 'object') return 0;
-                        let correctPairs = 0;
-                        var solMap = q.solutionMap || (q.pairs ? q.pairs.reduce(function(acc, p){ acc[p.item]=p.match; return acc; }, {}) : {});
-                        Object.keys(sel).forEach(function(k){ if (sel[k] === solMap[k]) correctPairs++; });
-                        if (correctPairs === 4) return 1.3;
-                        if (correctPairs >= 2) return 0.5;
-                        return 0;
-                    }
-                    return 0;
-                };
-
-                const calcClosed = function(s){ let t=0; CLOSED.forEach(function(q){ t+=calcPts(q, s.answers[q.id]); }); return t; };
-                const calcOpen = function(s){ let t=0; OPEN.forEach(function(q){ const a=s.answers[q.id]; if(a && a.score!=null) t+=parseFloat(a.score); }); return t; };
+                const CLOSED = Q.filter(function(q){ return q.type === 'single'; });
+                const OPEN = Q.find(function(q){ return q.type === 'open'; });
+                const calcClosed = function(s){ var t=0; CLOSED.forEach(function(q){ var a=s.answers[q.id]; if(a && a.selection===q.correctIndex) t+=q.points; }); return t; };
                 const students = Object.keys(D.students).map(function(k){ return D.students[k]; }).sort(function(a,b){ return (a.lastName+a.firstName).localeCompare(b.lastName+b.firstName); });
 
                 function Dettaglio(props){
                     var s = props.student;
                     var closed = s.closedScore!=null ? s.closedScore : calcClosed(s);
-                    var open = calcOpen(s);
+                    var open = s.openScore!=null ? s.openScore : 0;
                     var tot = closed + open;
                     var pct = D.maxTotal ? Math.round(tot/D.maxTotal*100) : 0;
+                    var voto = D.maxTotal ? (tot/D.maxTotal*10) : 0;
                     var passed = pct >= D.SOGLIA;
-                    
-                    var closedPct = D.maxClosed ? Math.round((closed/D.maxClosed)*100) : 0;
-                    var openPct = D.maxOpen ? Math.round((open/D.maxOpen)*100) : 0;
-
                     return (
-                        <div className="max-w-3xl mx-auto px-4 py-6">
+                        <div className="max-w-2xl mx-auto px-4 py-6">
                             <button onClick={props.back} className="mb-4 text-sm font-bold text-[#34495e] flex items-center gap-1">&larr; Torna all'elenco</button>
                             <div className="bg-white rounded-3xl shadow-md border border-gray-100 p-7 mb-5">
                                 <div className="flex justify-between items-start">
@@ -1468,99 +1082,54 @@
                                         <h2 className="text-2xl font-extrabold text-[#34495e]">{s.lastName} {s.firstName}</h2>
                                     </div>
                                     <div className="text-right">
-                                        <div className={"text-4xl font-extrabold " + (passed?"text-[#7fb088]":"text-[#c0392b]")}>{pct}%</div>
-                                        <div className="text-xs font-semibold text-[#756f63] mt-1">VOTO FINALE</div>
+                                        <div className={"text-4xl font-extrabold " + (passed?"text-[#7fb088]":"text-[#c0392b]")}>{voto.toFixed(1)}<span className="text-base text-[#756f63]">/10</span></div>
+                                        <div className="text-xs font-semibold text-[#756f63] mt-1">{tot}/{D.maxTotal} · {pct}%</div>
                                     </div>
                                 </div>
                                 <div className="flex gap-2 mt-3 text-xs font-semibold">
-                                    <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Chiuse {closedPct}%</span>
-                                    <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Aperte {openPct}%</span>
+                                    <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Chiuse {closed}/{D.maxClosed}</span>
+                                    <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Aperta {open}/{D.maxOpen}</span>
                                 </div>
                             </div>
-                            
                             {CLOSED.map(function(q,i){
                                 var a = s.answers[q.id];
-                                var pts = calcPts(q, a);
-                                var answered = false;
-                                if(a){
-                                    if(q.type === 'multi') answered = Array.isArray(a.selection) && a.selection.length>0;
-                                    else if(q.type === 'matching') answered = typeof a.selection === 'object' && Object.keys(a.selection).length>0;
-                                    else answered = a.selection !== undefined;
-                                }
-
-                                var ok = Math.abs(pts - q.points) < 0.01;
-                                var parz = !ok && pts > 0;
-                                
-                                var badgeClass = "bg-gray-200 text-gray-600";
-                                var badgeText = "NON RISPOSTA";
-                                var border = "border-gray-300";
-                                if (answered) {
-                                    if(ok){ badgeClass="bg-[#7fb088]/10 text-[#7fb088]"; badgeText="CORRETTA"; border="border-[#7fb088]"; }
-                                    else if(parz){ badgeClass="bg-[#f7dd73]/30 text-[#7a6310]"; badgeText="PARZIALE"; border="border-[#f7dd73]"; }
-                                    else { badgeClass="bg-[#c0392b]/10 text-[#c0392b]"; badgeText="ERRATA"; border="border-[#c0392b]"; }
-                                }
-
+                                var answered = a && a.selection!=null;
+                                var ok = answered && a.selection===q.correctIndex;
+                                var border = answered ? (ok?"border-[#7fb088]":"border-[#c0392b]") : "border-gray-300";
                                 return (
                                     <div key={q.id} className={"bg-white p-5 rounded-2xl shadow-sm border-l-8 mb-4 " + border}>
                                         <div className="flex justify-between items-center mb-2">
-                                            <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda {i+1} <span className="lowercase text-gray-400 ml-1">({q.type})</span></span>
-                                            <span className={"text-xs font-bold px-2 py-1 rounded " + badgeClass}>{badgeText}</span>
+                                            <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda {i+1}</span>
+                                            <span className={"text-xs font-bold px-2 py-1 rounded " + (answered?(ok?"bg-[#7fb088]/10 text-[#7fb088]":"bg-[#c0392b]/10 text-[#c0392b]"):"bg-gray-200 text-gray-600")}>{answered?(ok?"CORRETTA":"ERRATA"):"NON RISPOSTA"}</span>
                                         </div>
                                         <p className="font-bold text-[#2e2e2e] mb-3 leading-relaxed">{q.question}</p>
-                                        
-                                        {q.type === 'single' || q.type === 'multi' ? (
-                                            <div className="space-y-2">
-                                                {q.options.map(function(opt,idx){
-                                                    var isSel = false; var isCor = false;
-                                                    if(q.type === 'single'){ isSel = a && a.selection===idx; isCor = idx===q.correctIndex; }
-                                                    if(q.type === 'multi'){ isSel = a && Array.isArray(a.selection) && a.selection.includes(idx); isCor = q.correctIndices.includes(idx); }
-                                                    var stl = "bg-gray-50 text-gray-400 border-transparent";
-                                                    if(isCor) stl = "bg-[#7fb088] text-white border-[#7fb088]";
-                                                    else if(isSel) stl = "bg-[#c0392b] text-white border-[#c0392b]";
-                                                    return <div key={idx} className={"p-3 rounded-xl text-sm font-medium border flex items-center justify-between " + stl}><span>{opt}</span><span className="text-xs font-extrabold">{isCor?"\u2713":(isSel?"\u2717":"")}</span></div>;
-                                                })}
-                                            </div>
-                                        ) : null}
-
-                                        {q.type === 'matching' ? (
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                <div>
-                                                    <div className="text-xs font-bold mb-1">Risposte Studente:</div>
-                                                    {a && a.selection && Object.keys(a.selection).length > 0 ? Object.entries(a.selection).map(function(pair, k){
-                                                        var solMap = q.solutionMap || (q.pairs ? q.pairs.reduce(function(acc, p){ acc[p.item]=p.match; return acc; }, {}) : {});
-                                                        var cor = solMap[pair[0]] === pair[1];
-                                                        return <div key={k} className="text-sm p-2 bg-gray-50 border rounded mb-1"><span className="font-semibold">{pair[0]}</span> &rarr; <span className={cor?"text-[#7fb088] font-bold":"text-[#c0392b] font-bold"}>{pair[1]}</span></div>;
-                                                    }) : <div className="text-sm text-gray-400 italic">Nessun abbinamento</div>}
-                                                </div>
-                                                <div>
-                                                    <div className="text-xs font-bold mb-1">Soluzione Corretta:</div>
-                                                    {Object.entries(q.solutionMap || (q.pairs ? q.pairs.reduce(function(acc, p){ acc[p.item]=p.match; return acc; }, {}) : {})).map(function(pair, k){
-                                                        return <div key={k} className="text-sm p-2 bg-[#eaf5e9] border border-[#7fb088] rounded mb-1"><span className="font-semibold">{pair[0]}</span> &rarr; <span className="text-[#34495e]">{pair[1]}</span></div>;
-                                                    })}
-                                                </div>
-                                            </div>
-                                        ) : null}
-
+                                        <div className="space-y-2">
+                                            {q.options.map(function(opt,idx){
+                                                var isSel = a && a.selection===idx;
+                                                var isCor = idx===q.correctIndex;
+                                                var stl = "bg-gray-50 text-gray-400 border-transparent";
+                                                if(isCor) stl = "bg-[#7fb088] text-white border-[#7fb088]";
+                                                else if(isSel) stl = "bg-[#c0392b] text-white border-[#c0392b]";
+                                                return <div key={idx} className={"p-3 rounded-xl text-sm font-medium border flex items-center justify-between " + stl}><span>{opt}</span><span className="text-xs font-extrabold">{isCor?"\u2713":(isSel?"\u2717":"")}</span></div>;
+                                            })}
+                                        </div>
                                         {q.explanation ? <div className="mt-4 pt-3 border-t border-gray-100"><div className="text-xs font-bold text-[#34495e] uppercase mb-1">Spiegazione</div><p className="text-sm text-[#756f63] leading-relaxed">{q.explanation}</p></div> : null}
                                     </div>
                                 );
                             })}
-                            
-                            {OPEN.map(function(q, i){
-                                var a = s.answers[q.id];
-                                return (
-                                    <div key={q.id} className="bg-white p-5 rounded-2xl shadow-sm border-l-8 border-[#34495e] mb-4">
-                                        <div className="flex justify-between items-center mb-2">
-                                            <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda Aperta {i+1}</span>
-                                            <span className="text-xs font-bold px-2 py-1 rounded bg-gray-100 text-[#34495e]">{a?.score || 0}/{q.points} pt</span>
-                                        </div>
-                                        <p className="font-bold text-[#2e2e2e] mb-3 leading-relaxed">{q.question}</p>
-                                        <div className="text-xs font-bold text-[#34495e] uppercase mb-1">Risposta dell'alunno</div>
-                                        <div className="bg-gray-50 rounded-xl p-4 text-sm whitespace-pre-wrap leading-relaxed text-[#2e2e2e]">{a?.selection || <span className="italic text-gray-400">Nessuna risposta fornita.</span>}</div>
-                                        {a?.comment ? <div className="bg-[#aed6f1]/20 rounded-xl p-4 text-sm mt-3"><div className="text-xs font-bold text-[#34495e] uppercase mb-1">Commento del docente</div><div className="text-[#2e2e2e] leading-relaxed">{a.comment}</div></div> : null}
+                            {OPEN ? (
+                                <div className="bg-white p-5 rounded-2xl shadow-sm border-l-8 border-[#34495e] mb-4">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda aperta</span>
+                                        <span className="text-xs font-bold px-2 py-1 rounded bg-gray-100 text-[#34495e]">{open}/{D.maxOpen} pt</span>
                                     </div>
-                                )
-                            })}
+                                    <p className="font-bold text-[#2e2e2e] mb-3 leading-relaxed">{OPEN.question}</p>
+                                    {OPEN.rubric ? <div className="text-xs text-[#756f63] bg-[#f7dd73]/15 rounded-lg p-3 mb-3 leading-relaxed"><b>Griglia di valutazione:</b> {OPEN.rubric}</div> : null}
+                                    <div className="text-xs font-bold text-[#34495e] uppercase mb-1">Risposta dell'alunno</div>
+                                    <div className="bg-gray-50 rounded-xl p-4 text-sm whitespace-pre-wrap leading-relaxed text-[#2e2e2e]">{s.openAnswer || "\u2014"}</div>
+                                    {s.openComment ? <div className="bg-[#aed6f1]/20 rounded-xl p-4 text-sm mt-3"><div className="text-xs font-bold text-[#34495e] uppercase mb-1">Commento del docente</div><div className="text-[#2e2e2e] leading-relaxed">{s.openComment}</div></div> : null}
+                                </div>
+                            ) : null}
                         </div>
                     );
                 }
@@ -1582,24 +1151,24 @@
                                     <div className="overflow-x-auto">
                                         <table className="w-full text-sm text-left">
                                             <thead className="bg-gray-50 text-[#756f63] text-xs uppercase">
-                                                <tr><th className="px-4 py-3">PIN</th><th className="px-4 py-3">Studente</th><th className="px-4 py-3 text-center">Chiuse</th><th className="px-4 py-3 text-center">Aperte</th><th className="px-4 py-3 text-center">Totale</th><th></th></tr>
+                                                <tr><th className="px-4 py-3">PIN</th><th className="px-4 py-3">Studente</th><th className="px-4 py-3 text-center">Chiuse</th><th className="px-4 py-3 text-center">Aperta</th><th className="px-4 py-3 text-center">Totale</th><th className="px-4 py-3 text-center">%</th><th className="px-4 py-3 text-center">Voto</th><th></th></tr>
                                             </thead>
                                             <tbody>
                                                 {students.map(function(s){
                                                     var closed = s.closedScore!=null?s.closedScore:calcClosed(s);
-                                                    var open = calcOpen(s);
+                                                    var open = s.openScore!=null?s.openScore:0;
                                                     var tot = closed+open;
                                                     var pct = D.maxTotal?Math.round(tot/D.maxTotal*100):0;
-                                                    var closedPct = D.maxClosed?Math.round((closed/D.maxClosed)*100):0;
-                                                    var openPct = D.maxOpen?Math.round((open/D.maxOpen)*100):0;
-                                                    
+                                                    var voto = D.maxTotal?(tot/D.maxTotal*10):0;
                                                     return (
                                                         <tr key={s.pin} onClick={function(){ setSel(s.pin); }} className="border-t border-gray-100 hover:bg-gray-50 cursor-pointer">
                                                             <td className="px-4 py-3 font-mono font-bold text-[#34495e]">{s.pin}</td>
                                                             <td className="px-4 py-3 font-semibold whitespace-nowrap">{s.lastName} {s.firstName}</td>
-                                                            <td className="px-4 py-3 text-center font-semibold text-[#34495e]">{closedPct}%</td>
-                                                            <td className="px-4 py-3 text-center font-semibold">{openPct}%</td>
-                                                            <td className={"px-4 py-3 text-center font-extrabold " + (pct>=D.SOGLIA?"text-[#7fb088]":"text-[#c0392b]")}>{pct}%</td>
+                                                            <td className="px-4 py-3 text-center font-semibold text-[#34495e]">{closed + "/" + D.maxClosed}</td>
+                                                            <td className="px-4 py-3 text-center font-semibold">{open + "/" + D.maxOpen}</td>
+                                                            <td className="px-4 py-3 text-center font-extrabold text-[#34495e]">{tot + "/" + D.maxTotal}</td>
+                                                            <td className={"px-4 py-3 text-center font-extrabold " + (pct>=D.SOGLIA?"text-[#7fb088]":"text-[#c0392b]")}>{pct + "%"}</td>
+                                                            <td className="px-4 py-3 text-center font-bold">{voto.toFixed(1)}</td>
                                                             <td className="px-4 py-3 text-right text-gray-300">&rsaquo;</td>
                                                         </tr>
                                                     );
@@ -1608,7 +1177,7 @@
                                         </table>
                                     </div>
                                 </div>
-                                <div className="mt-4 text-xs text-[#756f63] text-center">Clicca su un alunno per vedere la verifica completa.</div>
+                                <div className="mt-4 text-xs text-[#756f63] text-center">Clicca su un alunno per vedere la verifica completa, con le risposte corrette, le spiegazioni e la correzione della domanda aperta.</div>
                                 <div className="text-center py-6 text-xs text-[#34495e]/70 font-semibold tracking-widest">ARTE BIANCA DI NEIVE</div>
                             </div>
                         </div>
@@ -1634,18 +1203,18 @@
         };
 
         /* =====================================================================
-           CORE DIRECTING DISPATCHER CON SYNC REALTIME CLOUD
+           CORE CORE CORE DIRECTING DISPATCHER CON SYNC REALTIME CLOUD
         ===================================================================== */
         const App = () => {
             const [view, setView] = useState('landing'); 
             const [session, setSession] = useState(null);
-            const [db, setDb] = useState({ version: 1, classes: {}, questions: [] });
+            const [db, setDb] = useState({ version: 1, classes: {} });
             const [loading, setLoading] = useState(true);
 
             const pullCloudState = async () => {
                 const { data, error } = await supabase.from('app_state').select('db_data, questions_data').eq('id', 1).single();
                 if (!error && data) {
-                    setDb({ version: 1, classes: data.db_data?.classes || {}, questions: data.questions_data || [] });
+                    setDb({ version: 1, classes: data.db_data?.classes || {} });
                 }
                 setLoading(false);
             };
@@ -1669,20 +1238,19 @@
                 } catch (e) { }
             }, []);
 
-            const syncUpdateCloud = async (cls, pin, updatedStudentData, fullClasses = null, fullQuestions = null) => {
+            const syncUpdateCloud = async (cls, pin, updatedStudentData, fullClasses = null) => {
                 let currentClasses = fullClasses ? fullClasses : { ...db.classes };
-                let currentQuestions = fullQuestions ? fullQuestions : [ ...db.questions ];
-                
+
                 if (cls && pin && updatedStudentData) {
                     currentClasses[cls].students[pin] = updatedStudentData;
                 }
 
-                setDb({ version: 1, classes: currentClasses, questions: currentQuestions });
-                await supabase.from('app_state').update({ db_data: { classes: currentClasses }, questions_data: currentQuestions }).eq('id', 1);
+                setDb({ version: 1, classes: currentClasses });
+                await supabase.from('app_state').update({ db_data: { classes: currentClasses }, questions_data: [] }).eq('id', 1);
             };
 
             const resetDatabaseCloud = async () => {
-                setDb({ version: 1, classes: {}, questions: [] });
+                setDb({ version: 1, classes: {} });
                 await supabase.from('app_state').update({ db_data: { classes: {} }, questions_data: [] }).eq('id', 1);
             };
 
@@ -1692,21 +1260,24 @@
                 const { cls, student } = found;
 
                 if (student.status === 'idle') {
+                    const clsQuestions = (db.classes[cls] && db.classes[cls].questions) || [];
                     const updated = { 
                         ...student, 
                         status: 'playing', 
                         startedAt: student.startedAt || Date.now(), 
-                        optionOrder: (student.optionOrder && Object.keys(student.optionOrder).length > 0) ? student.optionOrder : buildOptionOrder(db.questions) 
+                        optionOrder: (student.optionOrder && Object.keys(student.optionOrder).length > 0) ? student.optionOrder : buildOptionOrder(clsQuestions) 
                     };
                     sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
                     setSession({ pin, cls }); setView('student');
                     syncUpdateCloud(cls, pin, updated);
                     callback({ ok: true });
                 } else if (student.status === 'submitted' || student.status === 'published') {
+                    // Entra senza problemi per vedere la correzione/risultati
                     sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
                     setSession({ pin, cls }); setView('student');
                     callback({ ok: true });
                 } else if (student.status === 'playing') {
+                    // Se il docente ha appena sbloccato, concedo UN rientro per riprendere da dove era.
                     if (student.resumeAllowed) {
                         const updated = { ...student, resumeAllowed: false };
                         sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
@@ -1714,6 +1285,7 @@
                         syncUpdateCloud(cls, pin, updated);
                         callback({ ok: true });
                     } else {
+                        // Blocco anti-furbetto: era in corso e sta entrando da un altro dispositivo/scheda
                         const updated = { ...student, status: 'locked' };
                         sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
                         setSession({ pin, cls }); setView('student');
@@ -1721,15 +1293,12 @@
                         callback({ ok: true });
                     }
                 } else if (student.status === 'locked') {
+                    // Già bloccato, va alla pagina di blocco
                     sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
                     setSession({ pin, cls }); setView('student');
                     callback({ ok: true });
                 }
             };
-
-            const maxClosed = db.questions ? Math.round(db.questions.filter(q => q.type !== 'open').reduce((a, q) => a + q.points, 0) * 10) / 10 : 0;
-            const maxOpen = db.questions ? Math.round(db.questions.filter(q => q.type === 'open').reduce((a, q) => a + q.points, 0) * 10) / 10 : 0;
-            const maxTotal = Math.round((maxClosed + maxOpen) * 10) / 10;
 
             if (loading) {
                 return (
@@ -1739,8 +1308,8 @@
                 );
             }
 
-            if (view === 'admin') return <AdminApp db={db} maxClosed={maxClosed} maxOpen={maxOpen} maxTotal={maxTotal} onSyncUpdate={syncUpdateCloud} onResetDB={resetDatabaseCloud} onExit={() => setView('landing')} />;
-            if (view === 'student' && session) return <StudentApp pin={session.pin} cls={session.cls} db={db} maxClosed={maxClosed} maxOpen={maxOpen} maxTotal={maxTotal} onSyncUpdate={syncUpdateCloud} onExit={() => { sessionStorage.removeItem(SESSION_KEY); setSession(null); setView('landing'); }} />;
+            if (view === 'admin') return <AdminApp db={db} onSyncUpdate={syncUpdateCloud} onResetDB={resetDatabaseCloud} onExit={() => setView('landing')} />;
+            if (view === 'student' && session) return <StudentApp pin={session.pin} cls={session.cls} db={db} onSyncUpdate={syncUpdateCloud} onExit={() => { sessionStorage.removeItem(SESSION_KEY); setSession(null); setView('landing'); }} />;
             return <Landing onStudent={handleStudentLogin} onAdmin={() => setView('admin')} />;
         };
 
