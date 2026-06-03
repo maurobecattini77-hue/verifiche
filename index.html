@@ -114,20 +114,113 @@
 
         const buildOptionOrder = (questions) => {
             const order = {};
-            questions.filter(q => q.type === 'single').forEach(q => {
-                order[q.id] = shuffle(q.options.map((_, i) => i));
+            questions.forEach(q => {
+                if (q.type === 'single' || q.type === 'multi') order[q.id] = shuffle(q.options.map((_, i) => i));
             });
             return order;
         };
 
-        const computeClosedScore = (student, questions) => {
-            let s = 0;
-            questions.filter(q => q.type === 'single').forEach(q => {
-                const a = student.answers[q.id];
-                if (a && a.selection === q.correctIndex) s += q.points;
+        // Per gli abbinamenti: ordine (per-studente) sia delle voci a sinistra sia delle opzioni a destra
+        const buildMatchOrder = (questions) => {
+            const mo = {};
+            questions.filter(q => q.type === 'matching').forEach(q => {
+                const idxs = (q.pairs || []).map((_, i) => i);
+                mo[q.id] = { items: shuffle(idxs), opts: shuffle(idxs) };
             });
-            return s;
+            return mo;
         };
+
+        // Ordine casuale delle domande, salvato per studente (così due vicini hanno sequenze diverse)
+        const buildQuestionOrder = (questions) => shuffle(questions.map(q => q.id));
+
+        const isClosed = (q) => q.type !== 'open';
+
+        // Punteggio di una domanda: parametrico per tipo; le aperte usano il voto del docente
+        const pointsForQuestion = (q, student) => {
+            if (q.type === 'open') {
+                const g = student.openGrades && student.openGrades[q.id];
+                return (g && g.score != null) ? g.score : 0;
+            }
+            const a = student.answers && student.answers[q.id];
+            if (!a || a.selection == null) return 0;
+            const sel = a.selection;
+            if (q.type === 'single') {
+                return sel === q.correctIndex ? q.points : 0;
+            }
+            if (q.type === 'multi') {
+                if (!Array.isArray(sel)) return 0;
+                const correct = sel.filter(i => (q.correctIndices || []).includes(i)).length;
+                const wrong = sel.length - correct;
+                if (wrong === 0 && correct === 2) return q.points;   // entrambe giuste
+                if (wrong === 0 && correct === 1) return 0.5;        // una sola giusta
+                return 0;
+            }
+            if (q.type === 'matching') {
+                const pairs = q.pairs || [];
+                const total = pairs.length || 4;
+                let ok = 0;
+                pairs.forEach(p => { if (sel && sel[p.item] === p.match) ok++; });
+                if (ok === total) return q.points;                  // tutte le coppie
+                if (ok >= 2) return 0.5;                             // 2 o 3 coppie
+                return 0;
+            }
+            return 0;
+        };
+
+        // Somma dei soli quesiti chiusi (compatibile con i punti dei vecchi richiami)
+        const computeClosedScore = (student, questions) =>
+            questions.filter(isClosed).reduce((t, q) => t + pointsForQuestion(q, student), 0);
+
+        // Tre conteggi separati: chiuse, aperte, totale (+ percentuale). Rileva solo cosa esiste.
+        const computeBreakdown = (student, questions) => {
+            let closedScore = 0, closedMax = 0, openScore = 0, openMax = 0;
+            questions.forEach(q => {
+                const pts = pointsForQuestion(q, student);
+                if (q.type === 'open') { openScore += pts; openMax += q.points; }
+                else { closedScore += pts; closedMax += q.points; }
+            });
+            const total = closedScore + openScore;
+            const totalMax = closedMax + openMax;
+            return { closedScore, closedMax, openScore, openMax, total, totalMax, percent: totalMax ? (total / totalMax * 100) : 0 };
+        };
+
+        // Tutte le domande aperte sono state valutate dal docente?
+        const allOpenGraded = (student, questions) => {
+            const opens = questions.filter(q => q.type === 'open');
+            if (opens.length === 0) return true;
+            return opens.every(q => student.openGrades && student.openGrades[q.id] && student.openGrades[q.id].score != null);
+        };
+
+        // Numero di quesiti aperti
+        const countOpen = (questions) => questions.filter(q => q.type === 'open').length;
+
+        // Le domande nell'ordine (casuale) salvato per lo studente; con fallback robusto
+        const orderedQuestions = (student, questions) => {
+            const ord = student && student.questionOrder;
+            if (Array.isArray(ord) && ord.length) {
+                const byId = {}; questions.forEach(q => { byId[q.id] = q; });
+                const list = ord.map(id => byId[id]).filter(Boolean);
+                questions.forEach(q => { if (!ord.includes(q.id)) list.push(q); });
+                return list;
+            }
+            return questions;
+        };
+
+        // Una domanda risulta "risposta"?
+        const isAnswered = (q, student) => {
+            if (q.type === 'open') {
+                const a = student.answers && student.answers[q.id];
+                return !!(a && typeof a.selection === 'string' && a.selection.trim().length > 0);
+            }
+            const a = student.answers && student.answers[q.id];
+            if (!a || a.selection == null) return false;
+            if (Array.isArray(a.selection)) return a.selection.length > 0;
+            if (typeof a.selection === 'object') return Object.keys(a.selection).length > 0;
+            return true;
+        };
+
+        // Numero "all'italiana" (virgola decimale)
+        const fmtN = (n) => parseFloat(Number(n || 0).toFixed(2)).toString().replace('.', ',');
 
         const findStudent = (classes, pin) => {
             for (const cls of Object.keys(classes)) {
@@ -156,13 +249,17 @@
             status: s.status || 'idle',
             answers: s.answers || {},
             optionOrder: s.optionOrder || {},
+            matchOrder: s.matchOrder || {},
+            questionOrder: Array.isArray(s.questionOrder) ? s.questionOrder : [],
+            openGrades: s.openGrades || {},
             openAnswer: s.openAnswer || '',
             openScore: s.openScore != null ? s.openScore : null,
             openComment: s.openComment || '',
             closedScore: s.closedScore != null ? s.closedScore : null,
-            graded: s.graded != null ? s.graded : (s.openScore != null),
+            graded: s.graded != null ? s.graded : false,
             startedAt: s.startedAt != null ? s.startedAt : null,
-            submittedAt: s.submittedAt != null ? s.submittedAt : null
+            submittedAt: s.submittedAt != null ? s.submittedAt : null,
+            resumeAllowed: s.resumeAllowed != null ? s.resumeAllowed : false
         });
 
         /* =====================================================================
@@ -263,15 +360,116 @@
             );
         };
 
-        const OpenAnswer = ({ value, onChange, locked }) => (
+        const OpenAnswer = ({ value, onChange, locked, maxLength = 400 }) => (
             <div>
-                <textarea value={value} disabled={locked} onChange={e => onChange(e.target.value)} onPaste={e => e.preventDefault()} onDrop={e => e.preventDefault()} rows={7} placeholder="Scrivi qui la tua risposta argomentata…"
+                <textarea value={value} disabled={locked} maxLength={maxLength} onChange={e => onChange(e.target.value)} onPaste={e => e.preventDefault()} onDrop={e => e.preventDefault()} rows={7} placeholder="Scrivi qui la tua risposta argomentata…"
                     className="w-full p-4 rounded-xl border-2 border-gray-200 focus:border-[#34495e] outline-none resize-none text-sm md:text-base leading-relaxed disabled:bg-gray-50" />
-                <div className="text-xs text-[#756f63] mt-2 flex items-center gap-1">
-                    <Icon name="alert" size={13}/> Per questa domanda incolla e trascinamento sono disattivati.
+                <div className="text-xs text-[#756f63] mt-2 flex items-center justify-between">
+                    <span className="flex items-center gap-1"><Icon name="alert" size={13}/> Incolla e trascinamento disattivati.</span>
+                    <span>{(value || '').length} / {maxLength}</span>
                 </div>
             </div>
         );
+
+        const MultiChoice = ({ q, answer, onToggle, order, locked, reveal }) => {
+            const sel = (answer && Array.isArray(answer.selection)) ? answer.selection : [];
+            const display = (order && order.length === q.options.length) ? order : q.options.map((_, i) => i);
+            return (
+                <div>
+                    {!reveal && <div className="text-xs font-semibold text-[#756f63] mb-2 flex items-center gap-1"><Icon name="alert" size={13}/> Seleziona esattamente 2 opzioni.</div>}
+                    <div className="space-y-3">
+                    {display.map((origIdx) => {
+                        const opt = q.options[origIdx];
+                        const picked = sel.includes(origIdx);
+                        const isCorrect = (q.correctIndices || []).includes(origIdx);
+                        let style = "bg-white border border-gray-200 text-[#2e2e2e]";
+                        let icon = null;
+                        if (reveal) {
+                            if (isCorrect) { style = "bg-[#7fb088] text-white border-[#7fb088]"; icon = "check"; }
+                            else if (picked) { style = "bg-[#c0392b] text-white border-[#c0392b]"; icon = "x"; }
+                            else { style = "bg-gray-50 text-gray-400 border-transparent opacity-70"; }
+                        } else if (picked) {
+                            style = "bg-[#aed6f1] border-[#34495e] text-[#2e2e2e] shadow-md";
+                        }
+                        const interactive = !locked && !reveal;
+                        return (
+                            <div key={origIdx} onClick={() => interactive && onToggle(q.id, origIdx)}
+                                className={`p-4 rounded-xl shadow-sm transition-all flex items-center justify-between ${style} ${interactive ? 'cursor-pointer hover:border-[#34495e] hover:shadow-md' : 'cursor-default'}`}>
+                                <div className="flex items-center w-full">
+                                    <div className={`w-5 h-5 rounded-md border-2 mr-4 flex items-center justify-center flex-shrink-0 ${(picked || (reveal && isCorrect)) ? 'border-white/60' : 'border-gray-300'}`}>
+                                        {(picked || (reveal && isCorrect)) && <div className={`w-2.5 h-2.5 rounded-sm ${reveal ? 'bg-white' : 'bg-[#34495e]'}`}></div>}
+                                    </div>
+                                    <span className="font-medium text-sm md:text-base leading-snug">{opt}</span>
+                                </div>
+                                {icon && <Icon name={icon} size={20} className="text-white ml-2 flex-shrink-0"/>}
+                            </div>
+                        );
+                    })}
+                    </div>
+                </div>
+            );
+        };
+
+        const Matching = ({ q, answer, onPick, order, locked, reveal }) => {
+            const pairs = q.pairs || [];
+            const sel = (answer && answer.selection && typeof answer.selection === 'object') ? answer.selection : {};
+            const itemsOrder = (order && order.items && order.items.length === pairs.length) ? order.items : pairs.map((_, i) => i);
+            const optsOrder = (order && order.opts && order.opts.length === pairs.length) ? order.opts : pairs.map((_, i) => i);
+            const matchOptions = optsOrder.map(i => pairs[i].match);
+            return (
+                <div className="space-y-3">
+                    {itemsOrder.map((i) => {
+                        const p = pairs[i];
+                        const chosen = sel[p.item] || "";
+                        const ok = chosen === p.match;
+                        let rowStyle = "border-gray-200";
+                        if (reveal) rowStyle = chosen ? (ok ? "border-[#7fb088] bg-[#7fb088]/5" : "border-[#c0392b] bg-[#c0392b]/5") : "border-gray-300";
+                        return (
+                            <div key={p.item} className={`p-3 rounded-xl border ${rowStyle}`}>
+                                <div className="font-semibold text-sm text-[#2e2e2e] mb-2">{p.item}</div>
+                                {!reveal ? (
+                                    <select value={chosen} disabled={locked} onChange={(e) => onPick(q.id, p.item, e.target.value)}
+                                        className="w-full p-2.5 rounded-lg border-2 border-gray-200 focus:border-[#34495e] outline-none text-sm bg-white">
+                                        <option value="">— scegli —</option>
+                                        {matchOptions.map((m, k) => <option key={k} value={m}>{m}</option>)}
+                                    </select>
+                                ) : (
+                                    <div className="text-sm">
+                                        <div className={ok ? "text-[#4c7a55] font-semibold" : "text-[#c0392b] font-semibold"}>
+                                            {chosen || <span className="italic text-gray-400">nessuna scelta</span>} {chosen ? (ok ? "\u2713" : "\u2717") : ""}
+                                        </div>
+                                        {!ok && <div className="text-[#34495e] text-xs mt-1">Corretto: {p.match}</div>}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            );
+        };
+
+        const OpenReview = ({ q, student, reveal }) => {
+            const a = student.answers && student.answers[q.id];
+            const text = (a && typeof a.selection === 'string') ? a.selection : '';
+            const g = student.openGrades && student.openGrades[q.id];
+            return (
+                <div>
+                    <div className="bg-gray-50 rounded-xl p-4 text-sm text-[#2e2e2e] whitespace-pre-wrap leading-relaxed">{text || <span className="italic text-gray-400">Nessuna risposta fornita.</span>}</div>
+                    {reveal && g && g.comment && (
+                        <div className="bg-[#aed6f1]/20 rounded-xl p-4 text-sm mt-3">
+                            <div className="text-xs font-bold text-[#34495e] uppercase mb-1">Commento del docente</div>
+                            <div className="text-[#2e2e2e] leading-relaxed">{g.comment}</div>
+                        </div>
+                    )}
+                    {reveal && q.idealAnswer && (
+                        <div className="mt-3 p-4 bg-[#aed6f1]/10 border-l-4 border-[#34495e] rounded">
+                            <div className="text-xs font-bold text-[#34495e] uppercase mb-1">Risposta ideale · punti chiave</div>
+                            <p className="text-sm text-[#2e2e2e] leading-relaxed">{q.idealAnswer}</p>
+                        </div>
+                    )}
+                </div>
+            );
+        };
 
         const Landing = ({ onStudent, onAdmin }) => {
             const [pin, setPin] = useState("");
@@ -335,14 +533,14 @@
            VISUALIZZAZIONE E REVISIONE DELLA PROVA COMPLETA
         ===================================================================== */
         const ReviewExam = ({ student, cls, reveal, questions, maxClosed, maxOpen, maxTotal }) => {
-            const closed = student.closedScore != null ? student.closedScore : computeClosedScore(student, questions);
-            const open = student.openScore != null ? student.openScore : 0;
-            const total = closed + open;
-            const percent = Math.round((total / maxTotal) * 100);
+            const bd = computeBreakdown(student, questions);
+            const total = bd.total;
+            const percent = bd.totalMax ? Math.round(bd.percent) : 0;
             const passed = percent >= SOGLIA_SUFFICIENZA;
-            const answeredCount = questions.filter(q => student.answers[q.id]).length + (student.openAnswer ? 1 : 0);
-            const closedQuestions = questions.filter(q => q.type === 'single');
-            const openQuestion = questions.find(q => q.type === 'open');
+            const ordered = orderedQuestions(student, questions);
+            const answeredCount = questions.filter(q => isAnswered(q, student)).length;
+            const hasClosed = bd.closedMax > 0;
+            const hasOpen = bd.openMax > 0;
 
             return (
                 <div>
@@ -354,7 +552,7 @@
                         {reveal ? (
                             <div className="text-right">
                                 <div className={`text-3xl font-extrabold tracking-tight ${passed ? 'text-[#7fb088]' : 'text-[#c0392b]'}`}>{percent}%</div>
-                                <div className="text-xs font-semibold text-[#756f63]">{total}/{maxTotal} · {(total/maxTotal*10).toFixed(1)}/10</div>
+                                <div className="text-xs font-semibold text-[#756f63]">{fmtN(total)}/{fmtN(bd.totalMax)} · {(bd.totalMax ? total/bd.totalMax*10 : 0).toFixed(1)}/10</div>
                             </div>
                         ) : (
                             <div className="text-right">
@@ -365,27 +563,47 @@
                     </div>
 
                     {reveal && (
-                        <div className="flex gap-2 mb-4 text-xs font-semibold">
-                            <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Chiuse: {closed}/{maxClosed}</span>
-                            <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Aperta: {open}/{maxOpen}</span>
+                        <div className="flex flex-wrap gap-2 mb-4 text-xs font-semibold">
+                            {hasClosed && <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Chiuse {fmtN(bd.closedScore)}/{fmtN(bd.closedMax)}</span>}
+                            {hasOpen && <span className="bg-[#d2b4de]/25 rounded-lg px-3 py-1.5 text-[#5b4a6b]">Aperte {fmtN(bd.openScore)}/{fmtN(bd.openMax)}</span>}
+                            <span className="bg-[#34495e] text-white rounded-lg px-3 py-1.5">Totale {fmtN(total)}/{fmtN(bd.totalMax)}</span>
                         </div>
                     )}
 
                     <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
-                        {closedQuestions.map((q, i) => {
-                            const a = student.answers[q.id];
-                            const answered = a && a.selection != null;
-                            const ok = answered && a.selection === q.correctIndex;
-                            const border = !reveal ? (answered ? "border-[#34495e]" : "border-gray-300") : (answered ? (ok ? "border-[#7fb088]" : "border-[#c0392b]") : "border-gray-300");
+                        {ordered.map((q, i) => {
+                            const a = student.answers ? student.answers[q.id] : null;
+                            const answered = isAnswered(q, student);
+                            const pts = pointsForQuestion(q, student);
+                            const isOpen = q.type === 'open';
+                            let border, badgeClass, badgeText;
+                            if (isOpen) {
+                                border = "border-[#d2b4de]"; badgeClass = "bg-[#d2b4de]/25 text-[#5b4a6b]"; badgeText = reveal ? `${fmtN(pts)}/${fmtN(q.points)} pt` : "APERTA";
+                            } else if (!reveal) {
+                                border = answered ? "border-[#34495e]" : "border-gray-300";
+                                badgeClass = answered ? "bg-[#aed6f1]/40 text-[#34495e]" : "bg-gray-200 text-gray-600";
+                                badgeText = answered ? "RISPOSTA" : "IN BIANCO";
+                            } else if (!answered) {
+                                border = "border-gray-300"; badgeClass = "bg-gray-200 text-gray-600"; badgeText = "NON RISPOSTA";
+                            } else if (Math.abs(pts - q.points) < 0.01) {
+                                border = "border-[#7fb088]"; badgeClass = "bg-[#7fb088]/10 text-[#7fb088]"; badgeText = "CORRETTA";
+                            } else if (pts > 0) {
+                                border = "border-[#f7dd73]"; badgeClass = "bg-[#f7dd73]/20 text-[#756f63]"; badgeText = "PARZIALE";
+                            } else {
+                                border = "border-[#c0392b]"; badgeClass = "bg-[#c0392b]/10 text-[#c0392b]"; badgeText = "ERRATA";
+                            }
                             return (
                                 <div key={q.id} className={`bg-white p-5 rounded-2xl shadow-sm border-l-8 ${border}`}>
                                     <div className="flex justify-between items-center mb-2">
                                         <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda {i+1}</span>
-                                        <span className={`text-xs font-bold px-2 py-1 rounded ${reveal ? (answered ? (ok ? 'bg-[#7fb088]/10 text-[#7fb088]' : 'bg-[#c0392b]/10 text-[#c0392b]') : 'bg-gray-200 text-gray-600') : (answered ? 'bg-[#aed6f1]/40 text-[#34495e]' : 'bg-gray-200 text-gray-600')}`}>{reveal ? (answered ? (ok ? 'CORRETTA' : 'ERRATA') : 'NON RISPOSTA') : (answered ? 'RISPOSTA' : 'IN BIANCO')}</span>
+                                        <span className={`text-xs font-bold px-2 py-1 rounded ${badgeClass}`}>{badgeText}</span>
                                     </div>
                                     <p className="font-bold text-[#2e2e2e] mb-3 leading-relaxed text-sm md:text-base">{q.question}</p>
-                                    <SingleChoice q={q} answer={a} onAnswer={()=>{}} locked reveal={reveal} />
-                                    {reveal && q.explanation && (
+                                    {q.type === 'single' && <SingleChoice q={q} answer={a} onAnswer={()=>{}} order={student.optionOrder?.[q.id]} locked reveal={reveal} />}
+                                    {q.type === 'multi' && <MultiChoice q={q} answer={a} onToggle={()=>{}} order={student.optionOrder?.[q.id]} locked reveal={reveal} />}
+                                    {q.type === 'matching' && <Matching q={q} answer={a} onPick={()=>{}} order={student.matchOrder?.[q.id]} locked reveal={reveal} />}
+                                    {q.type === 'open' && <OpenReview q={q} student={student} reveal={reveal} />}
+                                    {reveal && !isOpen && q.explanation && (
                                         <div className="mt-4 pt-3 border-t border-gray-100">
                                             <div className="text-xs font-bold text-[#34495e] uppercase mb-1">Spiegazione</div>
                                             <p className="text-sm text-[#756f63] leading-relaxed">{q.explanation}</p>
@@ -394,23 +612,6 @@
                                 </div>
                             );
                         })}
-
-                        {openQuestion && (
-                            <div className="bg-white p-5 rounded-2xl shadow-sm border-l-8 border-[#34495e]">
-                                <div className="flex justify-between items-center mb-2">
-                                    <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda aperta</span>
-                                    {reveal && <span className="text-xs font-bold px-2 py-1 rounded bg-gray-100 text-[#34495e]">{open}/{maxOpen} pt</span>}
-                                </div>
-                                <p className="font-bold text-[#2e2e2e] mb-3 leading-relaxed text-sm md:text-base">{openQuestion.question}</p>
-                                <div className="bg-gray-50 rounded-xl p-4 text-sm text-[#2e2e2e] whitespace-pre-wrap leading-relaxed">{student.openAnswer || <span className="italic text-gray-400">Nessuna risposta fornita.</span>}</div>
-                                {reveal && student.openComment && (
-                                    <div className="bg-[#aed6f1]/20 rounded-xl p-4 text-sm mt-3">
-                                        <div className="text-xs font-bold text-[#34495e] uppercase mb-1">Commento del docente</div>
-                                        <div className="text-[#2e2e2e] leading-relaxed">{student.openComment}</div>
-                                    </div>
-                                )}
-                            </div>
-                        )}
                     </div>
                 </div>
             );
@@ -438,13 +639,32 @@
             const answer = (qid, selection) => {
                 if (student.status !== 'playing') return;
                 const updatedStudent = { ...student };
-                updatedStudent.answers = { ...updatedStudent.answers, [qid]: { selection, isLocked: true } };
+                updatedStudent.answers = { ...updatedStudent.answers, [qid]: { selection } };
                 onSyncUpdate(cls, pin, updatedStudent);
             };
-            
-            const setOpen = (text) => {
+
+            const toggleMulti = (qid, idx) => {
                 if (student.status !== 'playing') return;
-                const updatedStudent = { ...student, openAnswer: text };
+                const cur = (student.answers[qid] && Array.isArray(student.answers[qid].selection)) ? student.answers[qid].selection : [];
+                let next;
+                if (cur.includes(idx)) next = cur.filter(x => x !== idx);
+                else if (cur.length >= 2) next = [cur[1], idx];   // mantiene al massimo 2 selezioni
+                else next = [...cur, idx];
+                const updatedStudent = { ...student, answers: { ...student.answers, [qid]: { selection: next } } };
+                onSyncUpdate(cls, pin, updatedStudent);
+            };
+
+            const pickMatch = (qid, itemText, matchText) => {
+                if (student.status !== 'playing') return;
+                const cur = (student.answers[qid] && student.answers[qid].selection && typeof student.answers[qid].selection === 'object') ? student.answers[qid].selection : {};
+                const next = { ...cur, [itemText]: matchText };
+                const updatedStudent = { ...student, answers: { ...student.answers, [qid]: { selection: next } } };
+                onSyncUpdate(cls, pin, updatedStudent);
+            };
+
+            const setOpen = (qid, text) => {
+                if (student.status !== 'playing') return;
+                const updatedStudent = { ...student, answers: { ...student.answers, [qid]: { selection: text } } };
                 onSyncUpdate(cls, pin, updatedStudent);
             };
             
@@ -499,9 +719,10 @@
                 );
             }
 
-            const q = questions[idx];
+            const ordered = orderedQuestions(student, questions);
+            const q = ordered[idx] || ordered[0];
             const ans = student.answers[q.id];
-            const answeredCount = questions.filter(cq => cq.type === 'open' ? !!student.openAnswer : !!student.answers[cq.id]).length;
+            const answeredCount = questions.filter(cq => isAnswered(cq, student)).length;
 
             return (
                 <div className="flex-grow flex flex-col min-h-screen">
@@ -520,24 +741,27 @@
 
                     <div className="flex-grow w-full max-w-2xl mx-auto px-4 py-4 flex flex-col">
                         <div className="flex flex-wrap gap-1.5 justify-center mb-4">
-                            {questions.map((qq, i) => (
+                            {ordered.map((qq, i) => (
                                 <button key={qq.id} onClick={() => setIdx(i)}
-                                    className={`w-3 h-3 rounded-full transition-all ${i === idx ? 'ring-2 ring-offset-1 ring-[#34495e] scale-125' : ''} ${(qq.type === 'open' ? !!student.openAnswer : !!student.answers[qq.id]) ? 'bg-[#34495e]' : 'bg-gray-300'}`} />
+                                    className={`w-3 h-3 rounded-full transition-all ${i === idx ? 'ring-2 ring-offset-1 ring-[#34495e] scale-125' : ''} ${isAnswered(qq, student) ? (qq.type === 'open' ? 'bg-[#d2b4de]' : 'bg-[#34495e]') : 'bg-gray-300'}`} />
                             ))}
                         </div>
 
                         <div className="bg-white rounded-2xl shadow-card border border-gray-100 p-6 flex-grow fade-in" key={q.id}>
                             <div className="flex items-center justify-between mb-3">
-                                <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda {idx+1} di {questions.length}</span>
-                                <span className="text-xs font-bold text-[#34495e] bg-gray-100 px-2 py-1 rounded">{q.points} pt</span>
+                                <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda {idx+1} di {ordered.length}</span>
+                                <span className="text-xs font-bold text-[#34495e] bg-gray-100 px-2 py-1 rounded">{fmtN(q.points)} pt</span>
                             </div>
                             <p className="font-bold text-[#2e2e2e] text-lg mb-5 leading-relaxed">{q.question}</p>
-                            {q.type === 'single' ? <SingleChoice q={q} answer={ans} onAnswer={answer} order={student.optionOrder?.[q.id]} /> : <OpenAnswer value={student.openAnswer} onChange={setOpen} />}
+                            {q.type === 'single' && <SingleChoice q={q} answer={ans} onAnswer={answer} order={student.optionOrder?.[q.id]} />}
+                            {q.type === 'multi' && <MultiChoice q={q} answer={ans} onToggle={toggleMulti} order={student.optionOrder?.[q.id]} />}
+                            {q.type === 'matching' && <Matching q={q} answer={ans} onPick={pickMatch} order={student.matchOrder?.[q.id]} />}
+                            {q.type === 'open' && <OpenAnswer value={ans && typeof ans.selection === 'string' ? ans.selection : ''} onChange={(t) => setOpen(q.id, t)} maxLength={q.maxLength || 400} />}
                         </div>
 
                         <div className="grid grid-cols-2 gap-3 mt-4">
                             <button disabled={idx === 0} onClick={() => setIdx(i => Math.max(0, i-1))} className="py-3.5 rounded-xl font-bold border-2 border-[#34495e] text-[#34495e] disabled:opacity-30 disabled:border-gray-200 disabled:text-gray-300 flex items-center justify-center gap-1"><Icon name="prev" size={18}/> Indietro</button>
-                            {idx < questions.length - 1 ? <button onClick={() => setIdx(i => Math.min(questions.length-1, i+1))} className="py-3.5 rounded-xl font-bold bg-[#34495e] text-white hover:bg-[#2c3e50] flex items-center justify-center gap-1">Avanti <Icon name="next" size={18}/></button> : <button onClick={() => setConfirmOpen(true)} className="py-3.5 rounded-xl font-bold bg-[#7fb088] text-white hover:brightness-95 flex items-center justify-center gap-2"><Icon name="send" size={18}/> Consegna</button>}
+                            {idx < ordered.length - 1 ? <button onClick={() => setIdx(i => Math.min(ordered.length-1, i+1))} className="py-3.5 rounded-xl font-bold bg-[#34495e] text-white hover:bg-[#2c3e50] flex items-center justify-center gap-1">Avanti <Icon name="next" size={18}/></button> : <button onClick={() => setConfirmOpen(true)} className="py-3.5 rounded-xl font-bold bg-[#7fb088] text-white hover:brightness-95 flex items-center justify-center gap-2"><Icon name="send" size={18}/> Consegna</button>}
                         </div>
                         <Signature />
                     </div>
@@ -625,10 +849,11 @@
                 reader.onload = () => {
                     try {
                         const parsed = JSON.parse(reader.result);
-                        if (!Array.isArray(parsed)) throw new Error("Array atteso.");
-                        const updatedClasses = { ...db.classes, [cls]: { ...classData, questions: parsed } };
+                        const domande = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.domande) ? parsed.domande : null);
+                        if (!domande || domande.length === 0) throw new Error("Nessuna domanda trovata.");
+                        const updatedClasses = { ...db.classes, [cls]: { ...classData, questions: domande } };
                         onSyncUpdate(null, null, null, updatedClasses);
-                        alert(`Verifica abbinata alla classe ${cls} (${parsed.length} domande).`);
+                        alert(`Verifica abbinata alla classe ${cls} (${domande.length} domande).`);
                     } catch (err) { alert("Errore nel file JSON dei quesiti."); }
                 };
                 reader.readAsText(file);
@@ -639,13 +864,17 @@
                 const cur = classData.students[pin];
                 const st = { ...cur, status: 'playing', resumeAllowed: true };
                 if (!st.optionOrder || Object.keys(st.optionOrder).length === 0) st.optionOrder = buildOptionOrder(questions);
+                if (!st.matchOrder || Object.keys(st.matchOrder).length === 0) st.matchOrder = buildMatchOrder(questions);
+                if (!Array.isArray(st.questionOrder) || !st.questionOrder.length) st.questionOrder = buildQuestionOrder(questions);
+                if (!st.openGrades) st.openGrades = {};
                 if (!st.startedAt) st.startedAt = Date.now();
                 onSyncUpdate(cls, pin, st);
             };
 
-            const saveGrade = (pin, score, comment) => {
-                const st = { ...classData.students[pin], openScore: score, openComment: comment, graded: true };
-                if (st.closedScore == null) st.closedScore = computeClosedScore(st, questions);
+            const saveGrade = (pin, grades) => {
+                const st = { ...classData.students[pin], openGrades: grades };
+                st.graded = allOpenGraded(st, questions);
+                st.closedScore = computeClosedScore(st, questions);
                 onSyncUpdate(cls, pin, st);
                 setGrading(null);
             };
@@ -842,7 +1071,7 @@
                                                     <th className="px-4 py-3 font-bold">Studente</th>
                                                     <th className="px-4 py-3 font-bold">Stato</th>
                                                     <th className="px-4 py-3 font-bold text-center">Chiuse</th>
-                                                    <th className="px-4 py-3 font-bold text-center">Aperta</th>
+                                                    <th className="px-4 py-3 font-bold text-center">Aperte</th>
                                                     <th className="px-4 py-3 font-bold text-center">Totale</th>
                                                     <th className="px-4 py-3 font-bold text-right">Azioni</th>
                                                 </tr>
@@ -852,9 +1081,10 @@
                                                     const submitted = s.status === 'submitted' || s.status === 'published';
                                                     const playing = s.status === 'playing';
                                                     const locked = s.status === 'locked';
-                                                    const answeredCount = questions.filter(q => s.answers[q.id]).length + (s.openAnswer ? 1 : 0);
-                                                    const closed = s.closedScore != null ? s.closedScore : (submitted ? computeClosedScore(s, questions) : null);
-                                                    const tot = submitted ? (closed + (s.openScore||0)) : null;
+                                                    const answeredCount = questions.filter(q => isAnswered(q, s)).length;
+                                                    const bd = computeBreakdown(s, questions);
+                                                    const hasOpen = bd.openMax > 0;
+                                                    const tot = submitted ? bd.total : null;
                                                     const canView = submitted || playing;
                                                     return (
                                                         <tr key={s.pin} className="border-t border-gray-100 hover:bg-gray-50/60">
@@ -866,9 +1096,9 @@
                                                                     {playing && <span className="text-xs font-bold text-[#34495e]">{answeredCount}/{questions.length}</span>}
                                                                 </div>
                                                             </td>
-                                                            <td className="px-4 py-3 text-center font-semibold text-[#34495e]">{closed != null ? `${closed}/${maxClosed}` : '—'}</td>
-                                                            <td className="px-4 py-3 text-center font-semibold">{submitted ? (s.openScore != null ? `${s.openScore}/${maxOpen}` : <span className="text-[#c0392b]">da valutare</span>) : '—'}</td>
-                                                            <td className="px-4 py-3 text-center">{tot != null ? <span className="inline-flex items-center gap-1 font-extrabold text-[#34495e]">{tot}/{maxTotal}{s.graded && <Icon name="lock" size={12} className="text-[#7fb088]" />}</span> : <span className="text-gray-400">—</span>}</td>
+                                                            <td className="px-4 py-3 text-center font-semibold text-[#34495e]">{submitted ? `${fmtN(bd.closedScore)}/${fmtN(bd.closedMax)}` : '—'}</td>
+                                                            <td className="px-4 py-3 text-center font-semibold">{submitted ? (hasOpen ? (s.graded ? `${fmtN(bd.openScore)}/${fmtN(bd.openMax)}` : <span className="text-[#c0392b]">da valutare</span>) : '—') : '—'}</td>
+                                                            <td className="px-4 py-3 text-center">{tot != null ? <span className="inline-flex items-center gap-1 font-extrabold text-[#34495e]">{fmtN(tot)}/{fmtN(bd.totalMax)}{s.graded && hasOpen && <Icon name="lock" size={12} className="text-[#7fb088]" />}</span> : <span className="text-gray-400">—</span>}</td>
                                                             <td className="px-4 py-3">
                                                                 <div className="flex justify-end gap-1.5 flex-wrap">
                                                                     {locked && <button onClick={() => sblocca(s.pin)} className="bg-[#aed6f1]/30 text-[#34495e] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-[#aed6f1]/60"><Icon name="unlock" size={14}/> Sblocca</button>}
@@ -889,7 +1119,7 @@
 
                     {gradingStudent && (
                         <Modal onClose={() => setGrading(null)} maxW="max-w-2xl">
-                            <GradingForm student={gradingStudent} questions={questions} maxOpen={maxOpen} onSave={saveGrade} onClose={() => setGrading(null)} />
+                            <GradingForm student={gradingStudent} questions={questions} onSave={saveGrade} onClose={() => setGrading(null)} />
                         </Modal>
                     )}
 
@@ -947,42 +1177,64 @@
             );
         };
 
-        const GradingForm = ({ student, questions, maxOpen, onSave, onClose }) => {
-            const [score, setScore] = useState(student.openScore != null ? student.openScore : 0);
-            const [comment, setComment] = useState(student.openComment || "");
-            const openQuestion = questions.find(q => q.type === 'open');
+        const GradingForm = ({ student, questions, onSave, onClose }) => {
+            const opens = questions.filter(q => q.type === 'open');
+            const [grades, setGrades] = useState(() => {
+                const init = {};
+                opens.forEach(q => {
+                    const g = student.openGrades && student.openGrades[q.id];
+                    init[q.id] = { score: (g && g.score != null) ? g.score : 0, comment: (g && g.comment) || "" };
+                });
+                return init;
+            });
+            const setScore = (qid, max, v) => {
+                let n = v === '' ? 0 : parseFloat(v); if (isNaN(n)) n = 0; n = Math.max(0, Math.min(max, n));
+                setGrades(p => ({ ...p, [qid]: { ...p[qid], score: n } }));
+            };
+            const setComment = (qid, c) => setGrades(p => ({ ...p, [qid]: { ...p[qid], comment: c } }));
+            const totalOpen = opens.reduce((t, q) => t + (grades[q.id] ? grades[q.id].score : 0), 0);
+            const maxOpenAll = opens.reduce((t, q) => t + q.points, 0);
 
             return (
                 <div>
-                    <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-xl font-extrabold text-[#34495e]">Valutazione Risposta Aperta</h3>
+                    <div className="flex items-center justify-between mb-2">
+                        <h3 className="text-xl font-extrabold text-[#34495e]">Correzione domande aperte</h3>
                         <button onClick={onClose} className="text-gray-400 hover:text-[#34495e]"><Icon name="x" size={22}/></button>
                     </div>
-                    <p className="font-bold text-[#2e2e2e] mb-2 leading-relaxed text-sm">{openQuestion?.question}</p>
-                    {openQuestion?.rubric && <div className="text-xs text-[#756f63] bg-[#f7dd73]/15 rounded-lg p-3 mb-4 leading-relaxed"><b>Criteri di valutazione:</b> {openQuestion.rubric}</div>}
+                    <div className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">{student.lastName} {student.firstName}</div>
+                    <div className="text-sm font-bold text-[#34495e] mb-4">Totale aperte: {fmtN(totalOpen)} / {fmtN(maxOpenAll)}</div>
 
-                    <div className="bg-gray-50 rounded-xl p-4 text-sm text-[#2e2e2e] whitespace-pre-wrap leading-relaxed mb-4 max-h-40 overflow-y-auto border">
-                        {student.openAnswer || <span className="italic text-gray-400">Nessun testo presente.</span>}
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <div className="text-xs font-bold text-[#34495e] uppercase mb-2">Punteggio (0–{maxOpen})</div>
-                            <div className="flex flex-wrap gap-1.5">
-                                {Array.from({ length: maxOpen + 1 }, (_, i) => i).map(n => (
-                                    <button key={n} onClick={() => setScore(n)} className={`w-9 h-9 rounded-xl font-extrabold transition-all ${score===n ? 'bg-[#34495e] text-white shadow-md' : 'bg-gray-100 text-[#34495e] hover:bg-gray-200'}`}>{n}</button>
-                                ))}
-                            </div>
-                        </div>
-                        <div>
-                            <div className="text-xs font-bold text-[#34495e] uppercase mb-2">Note / Commento feedback</div>
-                            <textarea value={comment} onChange={e => setComment(e.target.value)} rows={3} placeholder="Note di correzione..." className="w-full p-3 rounded-xl border-2 border-gray-200 focus:border-[#34495e] outline-none resize-none text-sm"/>
-                        </div>
+                    <div className="space-y-5 max-h-[55vh] overflow-y-auto pr-1">
+                        {opens.map((q, i) => {
+                            const a = student.answers && student.answers[q.id];
+                            const txt = (a && typeof a.selection === 'string') ? a.selection : '';
+                            return (
+                                <div key={q.id} className="border-b border-gray-100 pb-5 last:border-0">
+                                    <div className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Aperta {i+1} · max {fmtN(q.points)} pt</div>
+                                    <p className="font-bold text-[#2e2e2e] mb-2 leading-relaxed text-sm">{q.question}</p>
+                                    {q.rubric && <div className="text-xs text-[#756f63] bg-[#f7dd73]/15 rounded-lg p-3 mb-2 leading-relaxed"><b>Griglia:</b> {q.rubric}</div>}
+                                    <div className="text-xs font-bold text-[#34495e] uppercase mb-1">Risposta dell'alunno</div>
+                                    <div className="bg-gray-50 rounded-xl p-3 text-sm whitespace-pre-wrap leading-relaxed mb-2 max-h-40 overflow-y-auto border">{txt || <span className="italic text-gray-400">Nessun testo presente.</span>}</div>
+                                    {q.idealAnswer && <div className="bg-[#aed6f1]/15 rounded-lg p-3 text-xs leading-relaxed mb-3"><b className="text-[#34495e]">Punti chiave attesi:</b> {q.idealAnswer}</div>}
+                                    <div className="flex flex-col md:flex-row md:items-center gap-3">
+                                        <div className="flex items-center gap-2">
+                                            <label className="text-sm font-bold text-[#34495e]">Punteggio</label>
+                                            <input type="number" min="0" max={q.points} step="0.1" value={grades[q.id] ? grades[q.id].score : 0}
+                                                onChange={(e) => setScore(q.id, q.points, e.target.value)}
+                                                className="w-24 p-2 rounded-lg border-2 border-gray-200 focus:border-[#34495e] outline-none text-center font-bold"/>
+                                            <span className="text-sm text-[#756f63]">/ {fmtN(q.points)}</span>
+                                        </div>
+                                        <input value={grades[q.id] ? grades[q.id].comment : ''} onChange={(e) => setComment(q.id, e.target.value)} placeholder="Commento (facoltativo)"
+                                            className="flex-grow p-2 rounded-lg border-2 border-gray-200 focus:border-[#34495e] outline-none text-sm"/>
+                                    </div>
+                                </div>
+                            );
+                        })}
                     </div>
 
                     <div className="grid grid-cols-2 gap-3 mt-5">
                         <button onClick={onClose} className="py-3 rounded-xl font-bold border-2 border-[#34495e] text-[#34495e] hover:bg-gray-50">Annulla</button>
-                        <button onClick={() => onSave(student.pin, score, comment)} className="py-3 rounded-xl font-bold bg-[#34495e] text-white hover:bg-[#2c3e50]">Registra Voto</button>
+                        <button onClick={() => onSave(student.pin, grades)} className="py-3 rounded-xl font-bold bg-[#34495e] text-white hover:bg-[#2c3e50]">Registra voti</button>
                     </div>
                 </div>
             );
@@ -992,17 +1244,51 @@
             const students = Object.values(classData.students)
                 .filter(s => s.status === 'submitted' || s.status === 'published')
                 .sort((a,b) => (a.lastName+a.firstName).localeCompare(b.lastName+b.firstName));
-            const closedQuestions = questions.filter(q => q.type === 'single');
-            const openQuestion = questions.find(q => q.type === 'open');
+
+            const describeAnswer = (q, s) => {
+                const a = s.answers ? s.answers[q.id] : null;
+                const sel = a ? a.selection : null;
+                if (q.type === 'single') {
+                    return <div style={{ marginLeft: 12 }}>
+                        <div>Scelta: {sel != null ? q.options[sel] : <i>Non risposta</i>}</div>
+                        {sel !== q.correctIndex && <div style={{ color: '#34495e' }}>Corretta: {q.options[q.correctIndex]}</div>}
+                    </div>;
+                }
+                if (q.type === 'multi') {
+                    const arr = Array.isArray(sel) ? sel : [];
+                    return <div style={{ marginLeft: 12 }}>
+                        <div>Selezionate: {arr.length ? arr.map(i => q.options[i]).join(' · ') : <i>Nessuna</i>}</div>
+                        <div style={{ color: '#34495e' }}>Corrette: {(q.correctIndices||[]).map(i => q.options[i]).join(' · ')}</div>
+                    </div>;
+                }
+                if (q.type === 'matching') {
+                    return <div style={{ marginLeft: 12 }}>
+                        {(q.pairs||[]).map((p, k) => {
+                            const ch = sel && sel[p.item];
+                            const ok = ch === p.match;
+                            return <div key={k} style={{ color: ok ? '#4c7a55' : '#c0392b' }}>{p.item} → {ch || '—'} {ok ? '✓' : '✗'}{!ok && <span style={{ color: '#34495e' }}> (corretto: {p.match})</span>}</div>;
+                        })}
+                    </div>;
+                }
+                if (q.type === 'open') {
+                    const g = s.openGrades && s.openGrades[q.id];
+                    const txt = (a && typeof a.selection === 'string') ? a.selection : '';
+                    return <div style={{ marginLeft: 12, whiteSpace: 'pre-wrap' }}>
+                        <div>Risposta: {txt || <i>Testo vuoto</i>}</div>
+                        {g && g.comment && <div style={{ marginTop: 4, fontStyle: 'italic', color: '#34495e' }}>Nota docente: {g.comment}</div>}
+                    </div>;
+                }
+                return null;
+            };
 
             const content = (
                 <div style={{ fontFamily: 'Cabin, sans-serif', color: '#2e2e2e' }}>
                     {students.length === 0 && <div style={{ padding: 20 }}>Nessuna prova consegnata disponibile per la stampa.</div>}
                     {students.map(s => {
-                        const closed = s.closedScore != null ? s.closedScore : computeClosedScore(s, questions);
-                        const open = s.openScore != null ? s.openScore : 0;
-                        const tot = closed + open;
-                        const percent = Math.round(tot / maxTotal * 100);
+                        const bd = computeBreakdown(s, questions);
+                        const percent = bd.totalMax ? Math.round(bd.percent) : 0;
+                        const ordered = orderedQuestions(s, questions);
+                        const hasClosed = bd.closedMax > 0, hasOpen = bd.openMax > 0;
                         return (
                             <div key={s.pin} className="print-student" style={{ padding: '4mm 0' }}>
                                 <div style={{ borderBottom: '3px solid #34495e', paddingBottom: 8, marginBottom: 14 }}>
@@ -1012,32 +1298,22 @@
                                         <div style={{ fontWeight: 700 }}>Classe {cls} · PIN {s.pin}</div>
                                     </div>
                                     <div style={{ marginTop: 6, fontWeight: 700 }}>
-                                        Punteggio: {tot}/{maxTotal} ({percent}%) — Risposte Chiuse {closed}/{maxClosed}, Aperta {open}/{maxOpen} — Voto {(tot/maxTotal*10).toFixed(1)}/10
+                                        Punteggio: {fmtN(bd.total)}/{fmtN(bd.totalMax)} ({percent}%)
+                                        {hasClosed && <span> — Chiuse {fmtN(bd.closedScore)}/{fmtN(bd.closedMax)}</span>}
+                                        {hasOpen && <span>, Aperte {fmtN(bd.openScore)}/{fmtN(bd.openMax)}</span>}
+                                        {' '}— Voto {(bd.totalMax ? bd.total/bd.totalMax*10 : 0).toFixed(1)}/10
                                     </div>
                                 </div>
 
-                                {closedQuestions.map((q, i) => {
-                                    const a = s.answers[q.id];
-                                    const sel = a ? a.selection : null;
-                                    const ok = sel === q.correctIndex;
+                                {ordered.map((q, i) => {
+                                    const pts = pointsForQuestion(q, s);
                                     return (
                                         <div key={q.id} className="print-q" style={{ marginBottom: 10, fontSize: 12 }}>
-                                            <div style={{ fontWeight: 700 }}>{i+1}. {q.question} <span style={{ color: ok ? '#7fb088' : '#c0392b', fontWeight: 800 }}>[{ok ? 'OK' : (sel==null ? 'n.r.' : 'X')}]</span></div>
-                                            <div style={{ marginLeft: 12 }}>
-                                                <div>Scelta dello studente: {sel != null ? q.options[sel] : <i>Non risposta</i>}</div>
-                                                {!ok && <div style={{ color: '#34495e' }}>Corretta: {q.options[q.correctIndex]}</div>}
-                                            </div>
+                                            <div style={{ fontWeight: 700 }}>{i+1}. {q.question} <span style={{ fontWeight: 800, color: '#34495e' }}>[{fmtN(pts)}/{fmtN(q.points)}]</span></div>
+                                            {describeAnswer(q, s)}
                                         </div>
                                     );
                                 })}
-
-                                {openQuestion && (
-                                    <div className="print-q" style={{ marginTop: 8, fontSize: 12 }}>
-                                        <div style={{ fontWeight: 700 }}>{closedQuestions.length+1}. {openQuestion.question} <span style={{ fontWeight: 800, color: '#34495e' }}>[{open}/{maxOpen}]</span></div>
-                                        <div style={{ marginLeft: 12, whiteSpace: 'pre-wrap' }}>Risposta data: {s.openAnswer || <i>Testo vuoto</i>}</div>
-                                        {s.openComment && <div style={{ marginLeft: 12, marginTop: 4, fontStyle: 'italic', color: '#34495e' }}>Nota docente: {s.openComment}</div>}
-                                    </div>
-                                )}
                             </div>
                         );
                     })}
@@ -1059,125 +1335,136 @@
                 const { useState } = React;
                 const D = window.__ARCHIVE__;
                 const Q = D.questions;
-                const CLOSED = Q.filter(function(q){ return q.type === 'single'; });
-                const OPEN = Q.find(function(q){ return q.type === 'open'; });
-                const calcClosed = function(s){ var t=0; CLOSED.forEach(function(q){ var a=s.answers[q.id]; if(a && a.selection===q.correctIndex) t+=q.points; }); return t; };
+                const SOGLIA = D.SOGLIA;
+                const fmtN = function(n){ return parseFloat(Number(n||0).toFixed(2)).toString().replace('.', ','); };
+                const pointsFor = function(q, s){
+                    if(q.type==='open'){ var g=s.openGrades&&s.openGrades[q.id]; return (g&&g.score!=null)?g.score:0; }
+                    var a=s.answers&&s.answers[q.id]; if(!a||a.selection==null) return 0; var sel=a.selection;
+                    if(q.type==='single') return sel===q.correctIndex?q.points:0;
+                    if(q.type==='multi'){ if(!Array.isArray(sel)) return 0; var c=sel.filter(function(i){return (q.correctIndices||[]).indexOf(i)>=0;}).length; var w=sel.length-c; if(w===0&&c===2) return q.points; if(w===0&&c===1) return 0.5; return 0; }
+                    if(q.type==='matching'){ var pairs=q.pairs||[]; var tot=pairs.length||4; var ok=0; pairs.forEach(function(p){ if(sel&&sel[p.item]===p.match) ok++; }); if(ok===tot) return q.points; if(ok>=2) return 0.5; return 0; }
+                    return 0;
+                };
+                const breakdown = function(s){
+                    var cs=0,cm=0,os=0,om=0;
+                    Q.forEach(function(q){ var p=pointsFor(q,s); if(q.type==='open'){os+=p;om+=q.points;} else {cs+=p;cm+=q.points;} });
+                    var total=cs+os, totalMax=cm+om;
+                    return {closedScore:cs,closedMax:cm,openScore:os,openMax:om,total:total,totalMax:totalMax,percent: totalMax?(total/totalMax*100):0};
+                };
+                const ordered = function(s){
+                    var ord=s.questionOrder; if(Array.isArray(ord)&&ord.length){ var byId={}; Q.forEach(function(q){byId[q.id]=q;}); var list=ord.map(function(id){return byId[id];}).filter(Boolean); Q.forEach(function(q){ if(ord.indexOf(q.id)<0) list.push(q); }); return list; } return Q;
+                };
                 const students = Object.keys(D.students).map(function(k){ return D.students[k]; }).sort(function(a,b){ return (a.lastName+a.firstName).localeCompare(b.lastName+b.firstName); });
 
+                function QView(props){
+                    var q=props.q, s=props.s;
+                    var a=s.answers&&s.answers[q.id];
+                    var sel=a?a.selection:null;
+                    if(q.type==='single' || q.type==='multi'){
+                        var picks = q.type==='multi' ? (Array.isArray(sel)?sel:[]) : (sel!=null?[sel]:[]);
+                        var corr = q.type==='multi' ? (q.correctIndices||[]) : [q.correctIndex];
+                        return (
+                            <div className="space-y-2">
+                                {q.options.map(function(opt,idx){
+                                    var isSel=picks.indexOf(idx)>=0; var isCor=corr.indexOf(idx)>=0;
+                                    var stl="bg-gray-50 text-gray-400 border-transparent";
+                                    if(isCor) stl="bg-[#7fb088] text-white border-[#7fb088]";
+                                    else if(isSel) stl="bg-[#c0392b] text-white border-[#c0392b]";
+                                    return <div key={idx} className={"p-3 rounded-xl text-sm font-medium border flex items-center justify-between "+stl}><span>{opt}</span><span className="text-xs font-extrabold">{isCor?"\u2713":(isSel?"\u2717":"")}</span></div>;
+                                })}
+                            </div>
+                        );
+                    }
+                    if(q.type==='matching'){
+                        return (
+                            <div className="space-y-2">
+                                {(q.pairs||[]).map(function(p,k){
+                                    var ch=sel&&sel[p.item]; var ok=ch===p.match;
+                                    return <div key={k} className={"p-3 rounded-xl border text-sm "+(ch?(ok?"border-[#7fb088] bg-[#7fb088]/5":"border-[#c0392b] bg-[#c0392b]/5"):"border-gray-300")}><div className="font-semibold text-[#2e2e2e]">{p.item}</div><div className={ok?"text-[#4c7a55]":"text-[#c0392b]"}>{ch||"\u2014"} {ch?(ok?"\u2713":"\u2717"):""}</div>{!ok?<div className="text-[#34495e] text-xs mt-1">Corretto: {p.match}</div>:null}</div>;
+                                })}
+                            </div>
+                        );
+                    }
+                    var txt=(a&&typeof a.selection==='string')?a.selection:'';
+                    var g=s.openGrades&&s.openGrades[q.id];
+                    return (
+                        <div>
+                            <div className="bg-gray-50 rounded-xl p-4 text-sm whitespace-pre-wrap leading-relaxed text-[#2e2e2e]">{txt||"\u2014"}</div>
+                            {g&&g.comment?<div className="bg-[#aed6f1]/20 rounded-xl p-4 text-sm mt-3"><div className="text-xs font-bold text-[#34495e] uppercase mb-1">Commento del docente</div><div className="text-[#2e2e2e] leading-relaxed">{g.comment}</div></div>:null}
+                            {q.idealAnswer?<div className="mt-3 p-4 bg-[#aed6f1]/10 border-l-4 border-[#34495e] rounded"><div className="text-xs font-bold text-[#34495e] uppercase mb-1">Risposta ideale · punti chiave</div><p className="text-sm text-[#2e2e2e] leading-relaxed">{q.idealAnswer}</p></div>:null}
+                        </div>
+                    );
+                }
+
                 function Dettaglio(props){
-                    var s = props.student;
-                    var closed = s.closedScore!=null ? s.closedScore : calcClosed(s);
-                    var open = s.openScore!=null ? s.openScore : 0;
-                    var tot = closed + open;
-                    var pct = D.maxTotal ? Math.round(tot/D.maxTotal*100) : 0;
-                    var voto = D.maxTotal ? (tot/D.maxTotal*10) : 0;
-                    var passed = pct >= D.SOGLIA;
+                    var s=props.student; var bd=breakdown(s);
+                    var pct=bd.totalMax?Math.round(bd.percent):0; var voto=bd.totalMax?(bd.total/bd.totalMax*10):0; var passed=pct>=SOGLIA;
+                    var list=ordered(s); var hasClosed=bd.closedMax>0, hasOpen=bd.openMax>0;
                     return (
                         <div className="max-w-2xl mx-auto px-4 py-6">
                             <button onClick={props.back} className="mb-4 text-sm font-bold text-[#34495e] flex items-center gap-1">&larr; Torna all'elenco</button>
                             <div className="bg-white rounded-3xl shadow-md border border-gray-100 p-7 mb-5">
                                 <div className="flex justify-between items-start">
-                                    <div>
-                                        <div className="text-xs font-bold text-gray-400 uppercase tracking-widest">Classe {D.cls} · PIN {s.pin}</div>
-                                        <h2 className="text-2xl font-extrabold text-[#34495e]">{s.lastName} {s.firstName}</h2>
-                                    </div>
-                                    <div className="text-right">
-                                        <div className={"text-4xl font-extrabold " + (passed?"text-[#7fb088]":"text-[#c0392b]")}>{voto.toFixed(1)}<span className="text-base text-[#756f63]">/10</span></div>
-                                        <div className="text-xs font-semibold text-[#756f63] mt-1">{tot}/{D.maxTotal} · {pct}%</div>
-                                    </div>
+                                    <div><div className="text-xs font-bold text-gray-400 uppercase tracking-widest">Classe {D.cls} · PIN {s.pin}</div><h2 className="text-2xl font-extrabold text-[#34495e]">{s.lastName} {s.firstName}</h2></div>
+                                    <div className="text-right"><div className={"text-4xl font-extrabold "+(passed?"text-[#7fb088]":"text-[#c0392b]")}>{voto.toFixed(1)}<span className="text-base text-[#756f63]">/10</span></div><div className="text-xs font-semibold text-[#756f63] mt-1">{fmtN(bd.total)}/{fmtN(bd.totalMax)} · {pct}%</div></div>
                                 </div>
-                                <div className="flex gap-2 mt-3 text-xs font-semibold">
-                                    <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Chiuse {closed}/{D.maxClosed}</span>
-                                    <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Aperta {open}/{D.maxOpen}</span>
+                                <div className="flex flex-wrap gap-2 mt-3 text-xs font-semibold">
+                                    {hasClosed?<span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#34495e]">Chiuse {fmtN(bd.closedScore)}/{fmtN(bd.closedMax)}</span>:null}
+                                    {hasOpen?<span className="bg-[#d2b4de]/25 rounded-lg px-3 py-1.5 text-[#5b4a6b]">Aperte {fmtN(bd.openScore)}/{fmtN(bd.openMax)}</span>:null}
+                                    <span className="bg-[#34495e] text-white rounded-lg px-3 py-1.5">Totale {fmtN(bd.total)}/{fmtN(bd.totalMax)}</span>
                                 </div>
                             </div>
-                            {CLOSED.map(function(q,i){
-                                var a = s.answers[q.id];
-                                var answered = a && a.selection!=null;
-                                var ok = answered && a.selection===q.correctIndex;
-                                var border = answered ? (ok?"border-[#7fb088]":"border-[#c0392b]") : "border-gray-300";
+                            {list.map(function(q,i){
+                                var pts=pointsFor(q,s); var isOpen=q.type==='open'; var ans=s.answers&&s.answers[q.id];
+                                var answered = isOpen ? (ans&&typeof ans.selection==='string'&&ans.selection.trim().length>0) : (ans&&ans.selection!=null);
+                                var border, badge, btxt;
+                                if(isOpen){ border="border-[#d2b4de]"; badge="bg-[#d2b4de]/25 text-[#5b4a6b]"; btxt=fmtN(pts)+"/"+fmtN(q.points)+" pt"; }
+                                else if(!answered){ border="border-gray-300"; badge="bg-gray-200 text-gray-600"; btxt="NON RISPOSTA"; }
+                                else if(Math.abs(pts-q.points)<0.01){ border="border-[#7fb088]"; badge="bg-[#7fb088]/10 text-[#7fb088]"; btxt="CORRETTA"; }
+                                else if(pts>0){ border="border-[#f7dd73]"; badge="bg-[#f7dd73]/20 text-[#756f63]"; btxt="PARZIALE"; }
+                                else { border="border-[#c0392b]"; badge="bg-[#c0392b]/10 text-[#c0392b]"; btxt="ERRATA"; }
                                 return (
-                                    <div key={q.id} className={"bg-white p-5 rounded-2xl shadow-sm border-l-8 mb-4 " + border}>
-                                        <div className="flex justify-between items-center mb-2">
-                                            <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda {i+1}</span>
-                                            <span className={"text-xs font-bold px-2 py-1 rounded " + (answered?(ok?"bg-[#7fb088]/10 text-[#7fb088]":"bg-[#c0392b]/10 text-[#c0392b]"):"bg-gray-200 text-gray-600")}>{answered?(ok?"CORRETTA":"ERRATA"):"NON RISPOSTA"}</span>
-                                        </div>
+                                    <div key={q.id} className={"bg-white p-5 rounded-2xl shadow-sm border-l-8 mb-4 "+border}>
+                                        <div className="flex justify-between items-center mb-2"><span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda {i+1}</span><span className={"text-xs font-bold px-2 py-1 rounded "+badge}>{btxt}</span></div>
                                         <p className="font-bold text-[#2e2e2e] mb-3 leading-relaxed">{q.question}</p>
-                                        <div className="space-y-2">
-                                            {q.options.map(function(opt,idx){
-                                                var isSel = a && a.selection===idx;
-                                                var isCor = idx===q.correctIndex;
-                                                var stl = "bg-gray-50 text-gray-400 border-transparent";
-                                                if(isCor) stl = "bg-[#7fb088] text-white border-[#7fb088]";
-                                                else if(isSel) stl = "bg-[#c0392b] text-white border-[#c0392b]";
-                                                return <div key={idx} className={"p-3 rounded-xl text-sm font-medium border flex items-center justify-between " + stl}><span>{opt}</span><span className="text-xs font-extrabold">{isCor?"\u2713":(isSel?"\u2717":"")}</span></div>;
-                                            })}
-                                        </div>
-                                        {q.explanation ? <div className="mt-4 pt-3 border-t border-gray-100"><div className="text-xs font-bold text-[#34495e] uppercase mb-1">Spiegazione</div><p className="text-sm text-[#756f63] leading-relaxed">{q.explanation}</p></div> : null}
+                                        {(q.rubric&&isOpen)?<div className="text-xs text-[#756f63] bg-[#f7dd73]/15 rounded-lg p-3 mb-3 leading-relaxed"><b>Griglia di valutazione:</b> {q.rubric}</div>:null}
+                                        <QView q={q} s={s} />
+                                        {(!isOpen&&q.explanation)?<div className="mt-4 pt-3 border-t border-gray-100"><div className="text-xs font-bold text-[#34495e] uppercase mb-1">Spiegazione</div><p className="text-sm text-[#756f63] leading-relaxed">{q.explanation}</p></div>:null}
                                     </div>
                                 );
                             })}
-                            {OPEN ? (
-                                <div className="bg-white p-5 rounded-2xl shadow-sm border-l-8 border-[#34495e] mb-4">
-                                    <div className="flex justify-between items-center mb-2">
-                                        <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda aperta</span>
-                                        <span className="text-xs font-bold px-2 py-1 rounded bg-gray-100 text-[#34495e]">{open}/{D.maxOpen} pt</span>
-                                    </div>
-                                    <p className="font-bold text-[#2e2e2e] mb-3 leading-relaxed">{OPEN.question}</p>
-                                    {OPEN.rubric ? <div className="text-xs text-[#756f63] bg-[#f7dd73]/15 rounded-lg p-3 mb-3 leading-relaxed"><b>Griglia di valutazione:</b> {OPEN.rubric}</div> : null}
-                                    <div className="text-xs font-bold text-[#34495e] uppercase mb-1">Risposta dell'alunno</div>
-                                    <div className="bg-gray-50 rounded-xl p-4 text-sm whitespace-pre-wrap leading-relaxed text-[#2e2e2e]">{s.openAnswer || "\u2014"}</div>
-                                    {s.openComment ? <div className="bg-[#aed6f1]/20 rounded-xl p-4 text-sm mt-3"><div className="text-xs font-bold text-[#34495e] uppercase mb-1">Commento del docente</div><div className="text-[#2e2e2e] leading-relaxed">{s.openComment}</div></div> : null}
-                                </div>
-                            ) : null}
                         </div>
                     );
                 }
 
                 function ArchiveApp(){
-                    const [sel, setSel] = useState(null);
-                    if (sel && D.students[sel]) return <Dettaglio student={D.students[sel]} back={function(){ setSel(null); }} />;
+                    const [sel,setSel]=useState(null);
+                    if(sel&&D.students[sel]) return <Dettaglio student={D.students[sel]} back={function(){setSel(null);}} />;
                     return (
                         <div>
-                            <div className="bg-[#34495e] text-white">
-                                <div className="max-w-5xl mx-auto px-4 py-5">
-                                    <div className="text-[11px] uppercase tracking-widest text-white/60">Arte Bianca di Neive · Archivio verifica (sola lettura)</div>
-                                    <div className="text-2xl font-extrabold">Classe {D.cls}</div>
-                                    <div className="text-xs text-white/70 mt-0.5">prof. Mauro Becattini · generato il {new Date(D.generatedAt).toLocaleString('it-IT')} · {students.length} alunni</div>
-                                </div>
-                            </div>
+                            <div className="bg-[#34495e] text-white"><div className="max-w-5xl mx-auto px-4 py-5"><div className="text-[11px] uppercase tracking-widest text-white/60">Arte Bianca di Neive · Archivio verifica (sola lettura)</div><div className="text-2xl font-extrabold">Classe {D.cls}</div><div className="text-xs text-white/70 mt-0.5">prof. Mauro Becattini · generato il {new Date(D.generatedAt).toLocaleString('it-IT')} · {students.length} alunni</div></div></div>
                             <div className="max-w-5xl mx-auto px-4 py-6">
-                                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full text-sm text-left">
-                                            <thead className="bg-gray-50 text-[#756f63] text-xs uppercase">
-                                                <tr><th className="px-4 py-3">PIN</th><th className="px-4 py-3">Studente</th><th className="px-4 py-3 text-center">Chiuse</th><th className="px-4 py-3 text-center">Aperta</th><th className="px-4 py-3 text-center">Totale</th><th className="px-4 py-3 text-center">%</th><th className="px-4 py-3 text-center">Voto</th><th></th></tr>
-                                            </thead>
-                                            <tbody>
-                                                {students.map(function(s){
-                                                    var closed = s.closedScore!=null?s.closedScore:calcClosed(s);
-                                                    var open = s.openScore!=null?s.openScore:0;
-                                                    var tot = closed+open;
-                                                    var pct = D.maxTotal?Math.round(tot/D.maxTotal*100):0;
-                                                    var voto = D.maxTotal?(tot/D.maxTotal*10):0;
-                                                    return (
-                                                        <tr key={s.pin} onClick={function(){ setSel(s.pin); }} className="border-t border-gray-100 hover:bg-gray-50 cursor-pointer">
-                                                            <td className="px-4 py-3 font-mono font-bold text-[#34495e]">{s.pin}</td>
-                                                            <td className="px-4 py-3 font-semibold whitespace-nowrap">{s.lastName} {s.firstName}</td>
-                                                            <td className="px-4 py-3 text-center font-semibold text-[#34495e]">{closed + "/" + D.maxClosed}</td>
-                                                            <td className="px-4 py-3 text-center font-semibold">{open + "/" + D.maxOpen}</td>
-                                                            <td className="px-4 py-3 text-center font-extrabold text-[#34495e]">{tot + "/" + D.maxTotal}</td>
-                                                            <td className={"px-4 py-3 text-center font-extrabold " + (pct>=D.SOGLIA?"text-[#7fb088]":"text-[#c0392b]")}>{pct + "%"}</td>
-                                                            <td className="px-4 py-3 text-center font-bold">{voto.toFixed(1)}</td>
-                                                            <td className="px-4 py-3 text-right text-gray-300">&rsaquo;</td>
-                                                        </tr>
-                                                    );
-                                                })}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-                                <div className="mt-4 text-xs text-[#756f63] text-center">Clicca su un alunno per vedere la verifica completa, con le risposte corrette, le spiegazioni e la correzione della domanda aperta.</div>
+                                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm text-left">
+                                    <thead className="bg-gray-50 text-[#756f63] text-xs uppercase"><tr><th className="px-4 py-3">PIN</th><th className="px-4 py-3">Studente</th><th className="px-4 py-3 text-center">Chiuse</th><th className="px-4 py-3 text-center">Aperte</th><th className="px-4 py-3 text-center">Totale</th><th className="px-4 py-3 text-center">%</th><th className="px-4 py-3 text-center">Voto</th><th></th></tr></thead>
+                                    <tbody>
+                                        {students.map(function(s){
+                                            var bd=breakdown(s); var pct=bd.totalMax?Math.round(bd.percent):0; var voto=bd.totalMax?(bd.total/bd.totalMax*10):0; var hasOpen=bd.openMax>0;
+                                            return (
+                                                <tr key={s.pin} onClick={function(){setSel(s.pin);}} className="border-t border-gray-100 hover:bg-gray-50 cursor-pointer">
+                                                    <td className="px-4 py-3 font-mono font-bold text-[#34495e]">{s.pin}</td>
+                                                    <td className="px-4 py-3 font-semibold whitespace-nowrap">{s.lastName} {s.firstName}</td>
+                                                    <td className="px-4 py-3 text-center font-semibold text-[#34495e]">{fmtN(bd.closedScore)+"/"+fmtN(bd.closedMax)}</td>
+                                                    <td className="px-4 py-3 text-center font-semibold">{hasOpen?(fmtN(bd.openScore)+"/"+fmtN(bd.openMax)):"\u2014"}</td>
+                                                    <td className="px-4 py-3 text-center font-extrabold text-[#34495e]">{fmtN(bd.total)+"/"+fmtN(bd.totalMax)}</td>
+                                                    <td className={"px-4 py-3 text-center font-extrabold "+(pct>=SOGLIA?"text-[#7fb088]":"text-[#c0392b]")}>{pct+"%"}</td>
+                                                    <td className="px-4 py-3 text-center font-bold">{voto.toFixed(1)}</td>
+                                                    <td className="px-4 py-3 text-right text-gray-300">&rsaquo;</td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table></div></div>
+                                <div className="mt-4 text-xs text-[#756f63] text-center">Clicca su un alunno per vedere la verifica completa, con risposte corrette, spiegazioni e correzione delle aperte.</div>
                                 <div className="text-center py-6 text-xs text-[#34495e]/70 font-semibold tracking-widest">ARTE BIANCA DI NEIVE</div>
                             </div>
                         </div>
@@ -1265,7 +1552,10 @@
                         ...student, 
                         status: 'playing', 
                         startedAt: student.startedAt || Date.now(), 
-                        optionOrder: (student.optionOrder && Object.keys(student.optionOrder).length > 0) ? student.optionOrder : buildOptionOrder(clsQuestions) 
+                        optionOrder: (student.optionOrder && Object.keys(student.optionOrder).length > 0) ? student.optionOrder : buildOptionOrder(clsQuestions),
+                        matchOrder: (student.matchOrder && Object.keys(student.matchOrder).length > 0) ? student.matchOrder : buildMatchOrder(clsQuestions),
+                        questionOrder: (Array.isArray(student.questionOrder) && student.questionOrder.length) ? student.questionOrder : buildQuestionOrder(clsQuestions),
+                        openGrades: student.openGrades || {}
                     };
                     sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
                     setSession({ pin, cls }); setView('student');
