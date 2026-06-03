@@ -309,10 +309,9 @@
             return <span className={className}>{icons[name]}</span>;
         };
 
-        const Signature = ({ light }) => (
+        const Signature = ({ light, title }) => (
             <div className="mt-8 mb-4 text-center opacity-80 select-none no-print">
-                <div className={`${light ? 'text-white' : 'text-[#34495e]'} font-bold tracking-widest text-sm`}>SISTEMA DI VALUTAZIONE LIVE</div>
-                <div className={`${light ? 'text-white/80' : 'text-[#34495e]'} text-xs font-medium`}>verifica digitale coordinata via cloud</div>
+                <div className={`${light ? 'text-white' : 'text-[#34495e]'} font-bold tracking-widest text-sm`}>{title ? title : 'ARTE BIANCA DI NEIVE'}</div>
             </div>
         );
 
@@ -558,9 +557,10 @@
                             <h3 className="text-xl font-extrabold text-[#34495e]">{student.lastName} {student.firstName}</h3>
                         </div>
                         {reveal ? (
-                            <div className="text-right">
-                                <div className={`text-3xl font-extrabold tracking-tight ${passed ? 'text-[#7fb088]' : 'text-[#c0392b]'}`}>{percent}%</div>
-                                <div className="text-xs font-semibold text-[#756f63]">{fmtN(total)}/{fmtN(bd.totalMax)} · voto {votoFromPercent(bd.percent)}</div>
+                            <div className="text-center">
+                                <div className="text-[10px] uppercase tracking-widest text-[#756f63] mb-0.5">Esito</div>
+                                <div className={`text-5xl font-extrabold leading-none tracking-tight ${passed ? 'text-[#7fb088]' : 'text-[#c0392b]'}`}>{percent}%</div>
+                                <div className={`text-3xl font-extrabold mt-1 ${passed ? 'text-[#7fb088]' : 'text-[#c0392b]'}`}>{votoFromPercent(bd.percent)}</div>
                             </div>
                         ) : (
                             <div className="text-right">
@@ -628,6 +628,7 @@
         const StudentApp = ({ pin, cls, db, onSyncUpdate }) => {
             const student = db.classes[cls]?.students[pin];
             const questions = (db.classes[cls] && db.classes[cls].questions) || [];
+            const examTitle = (db.classes[cls] && db.classes[cls].examTitle) || '';
             const maxClosed = questions.filter(q => q.type === 'single').reduce((a, q) => a + q.points, 0);
             const openQuestion = questions.find(q => q.type === 'open');
             const maxOpen = openQuestion ? openQuestion.points : 0;
@@ -711,7 +712,7 @@
                         <h1 className="text-2xl font-extrabold text-[#34495e] mt-6">Verifica consegnata</h1>
                         <p className="mt-3 text-[#756f63] max-w-xs font-medium">La tua prova è stata inviata con successo. Attendi la pubblicazione degli esiti.</p>
                         <div className="mt-6 bg-gray-100 rounded-2xl px-5 py-3 font-bold text-[#34495e]">{student.lastName} {student.firstName}</div>
-                        <Signature />
+                        <Signature title={examTitle} />
                     </div>
                 );
             }
@@ -721,7 +722,7 @@
                     <div className="flex-grow flex flex-col items-center p-4 pt-6 fade-in">
                         <div className="w-full max-w-2xl">
                             <ReviewExam student={student} cls={cls} reveal={true} questions={questions} maxClosed={maxClosed} maxOpen={maxOpen} maxTotal={maxTotal} />
-                            <Signature />
+                            <Signature title={examTitle} />
                         </div>
                     </div>
                 );
@@ -771,7 +772,7 @@
                             <button disabled={idx === 0} onClick={() => setIdx(i => Math.max(0, i-1))} className="py-3.5 rounded-xl font-bold border-2 border-[#34495e] text-[#34495e] disabled:opacity-30 disabled:border-gray-200 disabled:text-gray-300 flex items-center justify-center gap-1"><Icon name="prev" size={18}/> Indietro</button>
                             {idx < ordered.length - 1 ? <button onClick={() => setIdx(i => Math.min(ordered.length-1, i+1))} className="py-3.5 rounded-xl font-bold bg-[#34495e] text-white hover:bg-[#2c3e50] flex items-center justify-center gap-1">Avanti <Icon name="next" size={18}/></button> : <button onClick={() => setConfirmOpen(true)} className="py-3.5 rounded-xl font-bold bg-[#7fb088] text-white hover:brightness-95 flex items-center justify-center gap-2"><Icon name="send" size={18}/> Consegna</button>}
                         </div>
-                        <Signature />
+                        <Signature title={examTitle} />
                     </div>
 
                     {confirmOpen && (
@@ -815,6 +816,7 @@
             const classData = db.classes[cls];
             const students = classData ? Object.values(classData.students).sort((a,b) => (a.lastName+a.firstName).localeCompare(b.lastName+b.firstName)) : [];
             const questions = (classData && classData.questions) || [];
+            const examTitle = (classData && classData.examTitle) || '';
             const maxClosed = questions.filter(q => q.type === 'single').reduce((a, q) => a + q.points, 0);
             const openQuestion = questions.find(q => q.type === 'open');
             const maxOpen = openQuestion ? openQuestion.points : 0;
@@ -837,7 +839,7 @@
                             };
                         });
                         const existing = db.classes[parsed.classe];
-                        const updatedClasses = { ...db.classes, [parsed.classe]: { published: false, students: newStudents, questions: (existing && existing.questions) || [] } };
+                        const updatedClasses = { ...db.classes, [parsed.classe]: { published: false, students: newStudents, questions: (existing && existing.questions) || [], examTitle: (existing && existing.examTitle) || '' } };
                         onSyncUpdate(null, null, null, updatedClasses);
                         setCls(parsed.classe);
                         alert(`Classe ${parsed.classe} caricata correttamente!`);
@@ -857,9 +859,10 @@
                         const parsed = JSON.parse(reader.result);
                         const domande = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.domande) ? parsed.domande : null);
                         if (!domande || domande.length === 0) throw new Error("Nessuna domanda trovata.");
-                        const updatedClasses = { ...db.classes, [cls]: { ...classData, questions: domande } };
+                        const titolo = (!Array.isArray(parsed) && parsed && parsed.titolo) ? String(parsed.titolo) : '';
+                        const updatedClasses = { ...db.classes, [cls]: { ...classData, questions: domande, examTitle: titolo } };
                         onSyncUpdate(null, null, null, updatedClasses);
-                        alert(`Verifica abbinata alla classe ${cls} (${domande.length} domande).`);
+                        alert(`Verifica abbinata alla classe ${cls} (${domande.length} domande${titolo ? ' · ' + titolo : ''}).`);
                     } catch (err) { alert("Errore nel file JSON dei quesiti."); }
                 };
                 reader.readAsText(file);
@@ -930,7 +933,8 @@
                     exportedAt: new Date().toISOString(),
                     classe: cls,
                     dati: { published: !!classData.published, students: classData.students },
-                    quesiti: questions
+                    quesiti: questions,
+                    examTitle: examTitle
                 };
                 downloadFile(JSON.stringify(payload, null, 2), 'backup_' + cls + '_' + oggiISO() + '.json', 'application/json');
             };
@@ -957,7 +961,8 @@
                             const studentsNorm = {};
                             Object.values(parsed.dati.students).forEach(s => { studentsNorm[String(s.pin)] = normalizzaStudente(s); });
                             const quesitiClasse = (Array.isArray(parsed.quesiti) && parsed.quesiti.length) ? parsed.quesiti : ((db.classes[parsed.classe] && db.classes[parsed.classe].questions) || []);
-                            const updatedClasses = { ...db.classes, [parsed.classe]: { published: !!parsed.dati.published, students: studentsNorm, questions: quesitiClasse } };
+                            const titoloClasse = parsed.examTitle || ((db.classes[parsed.classe] && db.classes[parsed.classe].examTitle) || '');
+                            const updatedClasses = { ...db.classes, [parsed.classe]: { published: !!parsed.dati.published, students: studentsNorm, questions: quesitiClasse, examTitle: titoloClasse } };
                             onSyncUpdate(null, null, null, updatedClasses);
                             setCls(parsed.classe);
                             alert("Backup della classe " + parsed.classe + " ripristinato" + ((Array.isArray(parsed.quesiti) && parsed.quesiti.length) ? " (insieme alla verifica abbinata)." : "."));
@@ -967,7 +972,7 @@
                             Object.keys(parsed.classes).forEach(c => {
                                 const studentsNorm = {};
                                 Object.values(parsed.classes[c].students || {}).forEach(s => { studentsNorm[String(s.pin)] = normalizzaStudente(s); });
-                                restored[c] = { published: !!parsed.classes[c].published, students: studentsNorm, questions: (parsed.classes[c].questions || (Array.isArray(parsed.questions) ? parsed.questions : [])) };
+                                restored[c] = { published: !!parsed.classes[c].published, students: studentsNorm, questions: (parsed.classes[c].questions || (Array.isArray(parsed.questions) ? parsed.questions : [])), examTitle: (parsed.classes[c].examTitle || '') };
                             });
                             onSyncUpdate(null, null, null, restored);
                             const primo = Object.keys(restored)[0];
@@ -1044,7 +1049,7 @@
                             </div>
                             <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-around">
                                 <div className="text-center"><div className="text-2xl font-extrabold text-[#34495e]">{classesList.length}</div><div className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Classi</div></div>
-                                <div className="text-center"><div className="text-2xl font-extrabold text-[#34495e]">{questions.length}</div><div className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Quesiti caricati</div></div>
+                                <div className="text-center"><div className="text-2xl font-extrabold text-[#34495e]">{questions.length}</div><div className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Quesiti caricati</div>{examTitle && <div className="text-[11px] font-semibold text-[#34495e] mt-0.5">({examTitle})</div>}</div>
                             </div>
                         </div>
 
@@ -1354,7 +1359,8 @@
             Object.values(classData.students).forEach(s => {
                 if (s.status === 'submitted' || s.status === 'published') studentsDone[String(s.pin)] = s;
             });
-            const payload = { cls, generatedAt: new Date().toISOString(), SOGLIA: SOGLIA_SUFFICIENZA, maxClosed, maxOpen, maxTotal, questions, students: studentsDone };
+            const examTitle = (classData && classData.examTitle) || '';
+            const payload = { cls, examTitle, generatedAt: new Date().toISOString(), SOGLIA: SOGLIA_SUFFICIENZA, maxClosed, maxOpen, maxTotal, questions, students: studentsDone };
             const dataJson = JSON.stringify(payload).replace(/</g, '\\u003c');
 
             const archScript = `
@@ -1473,7 +1479,7 @@
                     if(sel&&D.students[sel]) return <Dettaglio student={D.students[sel]} back={function(){setSel(null);}} />;
                     return (
                         <div>
-                            <div className="bg-[#34495e] text-white"><div className="max-w-5xl mx-auto px-4 py-5"><div className="text-[11px] uppercase tracking-widest text-white/60">Arte Bianca di Neive · Archivio verifica (sola lettura)</div><div className="text-2xl font-extrabold">Classe {D.cls}</div><div className="text-xs text-white/70 mt-0.5">prof. Mauro Becattini · generato il {new Date(D.generatedAt).toLocaleString('it-IT')} · {students.length} alunni</div></div></div>
+                            <div className="bg-[#34495e] text-white"><div className="max-w-5xl mx-auto px-4 py-5"><div className="text-[11px] uppercase tracking-widest text-white/60">Arte Bianca di Neive · Archivio verifica{D.examTitle ? " (" + D.examTitle + ")" : ""}</div><div className="text-2xl font-extrabold">Classe {D.cls}</div><div className="text-xs text-white/70 mt-0.5">prof. Mauro Becattini · generato il {new Date(D.generatedAt).toLocaleString('it-IT')} · {students.length} alunni</div></div></div>
                             <div className="max-w-5xl mx-auto px-4 py-6">
                                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm text-left">
                                     <thead className="bg-gray-50 text-[#756f63] text-xs uppercase"><tr><th className="px-4 py-3">PIN</th><th className="px-4 py-3">Studente</th><th className="px-4 py-3 text-center">Chiuse</th><th className="px-4 py-3 text-center">Aperte</th><th className="px-4 py-3 text-center">Totale</th><th className="px-4 py-3 text-center">%</th><th className="px-4 py-3 text-center">Voto</th><th></th></tr></thead>
