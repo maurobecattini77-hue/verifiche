@@ -560,7 +560,7 @@
                             <div className="text-center">
                                 <div className="text-[10px] uppercase tracking-widest text-[#756f63] mb-0.5">Esito</div>
                                 <div className={`text-5xl font-extrabold leading-none tracking-tight ${passed ? 'text-[#7fb088]' : 'text-[#c0392b]'}`}>{percent}%</div>
-                                <div className={`text-3xl font-extrabold mt-1 ${passed ? 'text-[#7fb088]' : 'text-[#c0392b]'}`}>{votoFromPercent(bd.percent)}</div>
+                                <div className="mt-1.5 text-[#2e2e2e]"><span className="text-sm font-medium">voto </span><span className="text-2xl font-extrabold">{votoFromPercent(bd.percent)}</span></div>
                             </div>
                         ) : (
                             <div className="text-right">
@@ -1502,7 +1502,6 @@
                                     </tbody>
                                 </table></div></div>
                                 <div className="mt-4 text-xs text-[#756f63] text-center">Clicca su un alunno per vedere la verifica completa, con risposte corrette, spiegazioni e correzione delle aperte.</div>
-                                <div className="text-center py-6 text-xs text-[#34495e]/70 font-semibold tracking-widest">ARTE BIANCA DI NEIVE</div>
                             </div>
                         </div>
                     );
