@@ -2,8 +2,8 @@ name: Keep Supabase Alive
 
 on:
   schedule:
-    - cron: '0 6 * * 1,3,5'   # lunedì, mercoledì e venerdì alle 06:00 UTC
-  workflow_dispatch:           # permette di lanciarlo a mano col pulsante "Run workflow"
+    - cron: '0 6 */2 * *'      # ogni 2 giorni alle 06:00 UTC (margine ampio sui 7 giorni)
+  workflow_dispatch:            # permette di lanciarlo a mano col pulsante "Run workflow"
 
 permissions:
   contents: write
@@ -15,13 +15,31 @@ jobs:
       - name: Scarica il repository
         uses: actions/checkout@v4
 
-      - name: Sveglia Supabase
+      - name: Scrivi un battito su Supabase (attività vera sul database)
+        env:
+          SUPABASE_URL: "https://zwuutlrafdmfqexbnohc.supabase.co"
+          SUPABASE_KEY: "sb_publishable_6oCmDuDh_8ibf-p4ZAcfZg_muXXuO8N"
         run: |
-          curl -s "https://zwuutlrafdmfqexbnohc.supabase.co/rest/v1/app_state?select=id&limit=1" \
-            -H "apikey: sb_publishable_6oCmDuDh_8ibf-p4ZAcfZg_muXXuO8N" \
-            -H "Authorization: Bearer sb_publishable_6oCmDuDh_8ibf-p4ZAcfZg_muXXuO8N"
+          set -e
+          echo "Invio del battito alla tabella keepalive..."
+          codice=$(curl -s -o risposta.txt -w "%{http_code}" \
+            -X POST "$SUPABASE_URL/rest/v1/keepalive" \
+            -H "apikey: $SUPABASE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
+            -d '{}')
+          echo "Codice di risposta HTTP: $codice"
+          echo "Risposta di Supabase:"
+          cat risposta.txt
+          echo ""
+          if [ "$codice" -lt 200 ] || [ "$codice" -ge 300 ]; then
+            echo "ERRORE: Supabase non ha accettato il battito (codice $codice)."
+            exit 1
+          fi
+          echo "Battito registrato correttamente."
 
-      - name: Lascia una traccia (per non far addormentare GitHub)
+      - name: Lascia una traccia su GitHub (per non far addormentare il repository)
         run: |
           date -u > .keepalive
           git config user.name "keepalive-bot"
