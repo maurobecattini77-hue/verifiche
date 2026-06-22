@@ -1,49 +1,45 @@
-name: Keep Supabase Alive
+name: Supabase Keep-Alive
 
+# Gira da solo ogni 2 giorni (margine ampio sotto i 7 giorni di Supabase)
+# e puoi avviarlo a mano dal pulsante "Run workflow".
 on:
   schedule:
-    - cron: '0 6 */2 * *'      # ogni 2 giorni alle 06:00 UTC (margine ampio sui 7 giorni)
-  workflow_dispatch:            # permette di lanciarlo a mano col pulsante "Run workflow"
+    - cron: '0 6 */2 * *'
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  ping:
+  keepalive:
     runs-on: ubuntu-latest
     steps:
       - name: Scarica il repository
         uses: actions/checkout@v4
 
-      - name: Scrivi un battito su Supabase (attività vera sul database)
-        env:
-          SUPABASE_URL: "https://zwuutlrafdmfqexbnohc.supabase.co"
-          SUPABASE_KEY: "sb_publishable_6oCmDuDh_8ibf-p4ZAcfZg_muXXuO8N"
+      - name: Scrittura reale sul database (tiene sveglio Supabase)
         run: |
-          set -e
-          echo "Invio del battito alla tabella keepalive..."
-          codice=$(curl -s -o risposta.txt -w "%{http_code}" \
-            -X POST "$SUPABASE_URL/rest/v1/keepalive" \
-            -H "apikey: $SUPABASE_KEY" \
-            -H "Authorization: Bearer $SUPABASE_KEY" \
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            "https://zwuutlrafdmfqexbnohc.supabase.co/rest/v1/keepalive" \
+            -H "apikey: sb_publishable_6oCmDuDh_8ibf-p4ZAcfZg_muXXuO8N" \
             -H "Content-Type: application/json" \
             -H "Prefer: return=minimal" \
-            -d '{}')
-          echo "Codice di risposta HTTP: $codice"
-          echo "Risposta di Supabase:"
-          cat risposta.txt
-          echo ""
-          if [ "$codice" -lt 200 ] || [ "$codice" -ge 300 ]; then
-            echo "ERRORE: Supabase non ha accettato il battito (codice $codice)."
-            exit 1
-          fi
-          echo "Battito registrato correttamente."
+            -d "{\"ts\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}")
+          echo "Risposta del database: HTTP $CODE"
+          case "$CODE" in
+            2*) echo "OK: ping registrato, timer di pausa azzerato." ;;
+            *) echo "ERRORE HTTP $CODE"; exit 1 ;;
+          esac
 
-      - name: Lascia una traccia su GitHub (per non far addormentare il repository)
+      - name: Marcatore anti-disattivazione (tiene vivo GitHub Actions)
         run: |
-          date -u > .keepalive
-          git config user.name "keepalive-bot"
-          git config user.email "keepalive@users.noreply.github.com"
-          git add .keepalive
-          git commit -m "keep-alive ping" || echo "niente da aggiornare"
+          mkdir -p .github
+          date -u +"%Y-%m-%d %H:%M:%S UTC" > .github/last-keepalive.txt
+
+      - name: Salva il marcatore
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/last-keepalive.txt
+          git commit -m "keep-alive: $(date -u +%F)" || exit 0
           git push
