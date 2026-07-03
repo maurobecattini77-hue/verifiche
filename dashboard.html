@@ -1,0 +1,1671 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Verifiche · prof. Becattini</title>
+
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Supabase Client -->
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..600&family=Schibsted+Grotesk:wght@400;500;600;700&display=swap');
+
+        h1, h2, h3 { font-family: 'Fraunces', serif; letter-spacing: -0.01em; }
+
+        body {
+            font-family: 'Schibsted Grotesk', sans-serif;
+            letter-spacing: -0.01em;
+            background-color: #eef0ea;
+            color: #262420;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #e3e5dd; }
+        ::-webkit-scrollbar-thumb { background: #b9a6d9; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #57534a; }
+
+        .fade-in { animation: fadeIn 0.4s ease-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .bounce-in { animation: bounceIn 0.7s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards; }
+        @keyframes bounceIn { 0% { transform: scale(0); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+        .pulse-red { animation: pulseRed 1.6s ease-in-out infinite; }
+        @keyframes pulseRed { 0%,100% { opacity: 1; } 50% { opacity: 0.65; } }
+        .scale-hover { transition: transform .15s ease; }
+        .scale-hover:hover { transform: scale(1.02); }
+
+        /* ====== STAMPA / EXPORT PDF ====== */
+        #print-area { display: none; }
+        @media print {
+            @page { size: A4; margin: 16mm 14mm; }
+            body { background: #ffffff !important; }
+            .no-print { display: none !important; }
+            #root { display: none !important; }
+            #print-area { display: block !important; }
+            .print-student { page-break-after: always; }
+            .print-student:last-child { page-break-after: auto; }
+            .print-q { page-break-inside: avoid; }
+        }
+    </style>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        ab: {
+                            blue: '#57534a',
+                            red: '#b4472f',
+                            lightblue: '#aec8ce',
+                            green: '#5c8b73',
+                            yellow: '#ebc871',
+                            amber: '#d99a4e',
+                            brown: '#827f75',
+                            dark: '#262420',
+                            lavender: '#b9a6d9',
+                            white: '#ffffff'
+                        }
+                    },
+                    boxShadow: {
+                        'card': '0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03)',
+                        'hover': '0 10px 15px -3px rgba(0,0,0,0.07), 0 4px 6px -2px rgba(0,0,0,0.03)'
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="min-h-screen flex flex-col bg-[#eef0ea]">
+
+    <div id="root" class="flex-grow flex flex-col relative"></div>
+    <div id="print-area"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        /* =====================================================================
+           CONFIGURAZIONE URL E CHIAVI SUPABASE
+        ===================================================================== */
+        const SUPABASE_URL = "https://zwuutlrafdmfqexbnohc.supabase.co"; 
+        const SUPABASE_ANON_KEY = "sb_publishable_6oCmDuDh_8ibf-p4ZAcfZg_muXXuO8N"; 
+
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        const ADMIN_PASSWORD = "16031948";      
+        const SESSION_KEY = "ab_exam_session_v1"; 
+        const SOGLIA_SUFFICIENZA = 60;            
+
+        /* =====================================================================
+           UTILS PER IL GOVERNO DELLE RISPOSTE E DEI PUNTEGGI
+        ===================================================================== */
+        const shuffle = (arr) => {
+            const a = [...arr];
+            for (let i = a.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [a[i], a[j]] = [a[j], a[i]];
+            }
+            return a;
+        };
+
+        const buildOptionOrder = (questions) => {
+            const order = {};
+            questions.forEach(q => {
+                if (q.type === 'single' || q.type === 'multi') order[q.id] = shuffle(q.options.map((_, i) => i));
+            });
+            return order;
+        };
+
+        // Per gli abbinamenti: ordine (per-studente) sia delle voci a sinistra sia delle opzioni a destra
+        const buildMatchOrder = (questions) => {
+            const mo = {};
+            questions.filter(q => q.type === 'matching').forEach(q => {
+                const idxs = (q.pairs || []).map((_, i) => i);
+                mo[q.id] = { items: shuffle(idxs), opts: shuffle(idxs) };
+            });
+            return mo;
+        };
+
+        // Ordine casuale delle domande, salvato per studente (così due vicini hanno sequenze diverse)
+        const buildQuestionOrder = (questions) => shuffle(questions.map(q => q.id));
+
+        const isClosed = (q) => q.type !== 'open';
+
+        // Punteggio di una domanda: parametrico per tipo; le aperte usano il voto del docente
+        const pointsForQuestion = (q, student) => {
+            if (q.type === 'open') {
+                const g = student.openGrades && student.openGrades[q.id];
+                return (g && g.score != null) ? g.score : 0;
+            }
+            const a = student.answers && student.answers[q.id];
+            if (!a || a.selection == null) return 0;
+            const sel = a.selection;
+            if (q.type === 'single') {
+                return sel === q.correctIndex ? q.points : 0;
+            }
+            if (q.type === 'multi') {
+                if (!Array.isArray(sel)) return 0;
+                const correct = sel.filter(i => (q.correctIndices || []).includes(i)).length;
+                const wrong = sel.length - correct;
+                if (wrong === 0 && correct === 2) return q.points;   // entrambe giuste
+                if (wrong === 0 && correct === 1) return 0.5;        // una sola giusta
+                return 0;
+            }
+            if (q.type === 'matching') {
+                const pairs = q.pairs || [];
+                const total = pairs.length || 4;
+                let ok = 0;
+                pairs.forEach(p => { if (sel && sel[p.item] === p.match) ok++; });
+                if (ok === total) return q.points;                  // tutte le coppie
+                if (ok >= 2) return 0.5;                             // 2 o 3 coppie
+                return 0;
+            }
+            return 0;
+        };
+
+        // Somma dei soli quesiti chiusi (compatibile con i punti dei vecchi richiami)
+        const computeClosedScore = (student, questions) =>
+            questions.filter(isClosed).reduce((t, q) => t + pointsForQuestion(q, student), 0);
+
+        // Tre conteggi separati: chiuse, aperte, totale (+ percentuale). Rileva solo cosa esiste.
+        const computeBreakdown = (student, questions) => {
+            let closedScore = 0, closedMax = 0, openScore = 0, openMax = 0;
+            questions.forEach(q => {
+                const pts = pointsForQuestion(q, student);
+                if (q.type === 'open') { openScore += pts; openMax += q.points; }
+                else { closedScore += pts; closedMax += q.points; }
+            });
+            const total = closedScore + openScore;
+            const totalMax = closedMax + openMax;
+            return { closedScore, closedMax, openScore, openMax, total, totalMax, percent: totalMax ? (total / totalMax * 100) : 0 };
+        };
+
+        // Tutte le domande aperte sono state valutate dal docente?
+        const allOpenGraded = (student, questions) => {
+            const opens = questions.filter(q => q.type === 'open');
+            if (opens.length === 0) return true;
+            return opens.every(q => student.openGrades && student.openGrades[q.id] && student.openGrades[q.id].score != null);
+        };
+
+        // Numero di quesiti aperti
+        const countOpen = (questions) => questions.filter(q => q.type === 'open').length;
+
+        // Le domande nell'ordine (casuale) salvato per lo studente; con fallback robusto
+        const orderedQuestions = (student, questions) => {
+            const ord = student && student.questionOrder;
+            if (Array.isArray(ord) && ord.length) {
+                const byId = {}; questions.forEach(q => { byId[q.id] = q; });
+                const list = ord.map(id => byId[id]).filter(Boolean);
+                questions.forEach(q => { if (!ord.includes(q.id)) list.push(q); });
+                return list;
+            }
+            return questions;
+        };
+
+        // Una domanda risulta "risposta"?
+        const isAnswered = (q, student) => {
+            if (q.type === 'open') {
+                const a = student.answers && student.answers[q.id];
+                return !!(a && typeof a.selection === 'string' && a.selection.trim().length > 0);
+            }
+            const a = student.answers && student.answers[q.id];
+            if (!a || a.selection == null) return false;
+            if (Array.isArray(a.selection)) return a.selection.length > 0;
+            if (typeof a.selection === 'object') return Object.keys(a.selection).length > 0;
+            return true;
+        };
+
+        // Numero "all'italiana" (virgola decimale)
+        const fmtN = (n) => parseFloat(Number(n || 0).toFixed(2)).toString().replace('.', ',');
+
+        // Conversione percentuale → voto del registro (3 minimo, 10 massimo)
+        const votoFromPercent = (percent) => {
+            const p = Math.round(percent);
+            if (p <= 30) return "3";
+            const tabella = [
+                [41, "4"], [43, "4+"], [46, "4,5"], [48, "5-"], [51, "5"], [53, "5+"], [56, "5,5"],
+                [58, "6-"], [61, "6"], [63, "6+"], [66, "6,5"], [68, "7-"], [71, "7"], [73, "7+"],
+                [76, "7,5"], [78, "8-"], [81, "8"], [83, "8+"], [86, "8,5"], [88, "9-"], [91, "9"],
+                [93, "9+"], [96, "9,5"], [98, "10-"], [100, "10"]
+            ];
+            for (let k = 0; k < tabella.length; k++) { if (p <= tabella[k][0]) return tabella[k][1]; }
+            return "10";
+        };
+
+        const findStudent = (classes, pin) => {
+            for (const cls of Object.keys(classes)) {
+                if (classes[cls].students[pin]) {
+                    return { cls, student: classes[cls].students[pin] };
+                }
+            }
+            return null;
+        };
+
+        // Scaricamento file robusto: la revoca ritardata evita che Firefox annulli il download.
+        const downloadFile = (content, filename, mime) => {
+            const blob = new Blob([content], { type: (mime || 'text/plain') + ';charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = filename; a.rel = 'noopener';
+            document.body.appendChild(a); a.click();
+            setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1500);
+        };
+        const oggiISO = () => new Date().toISOString().slice(0, 10);
+
+        // Normalizza uno studente ripristinato da backup (compatibilita' con backup vecchi)
+        const normalizzaStudente = (s) => ({
+            pin: String(s.pin),
+            firstName: s.firstName || '', lastName: s.lastName || '',
+            status: s.status || 'idle',
+            answers: s.answers || {},
+            optionOrder: s.optionOrder || {},
+            matchOrder: s.matchOrder || {},
+            questionOrder: Array.isArray(s.questionOrder) ? s.questionOrder : [],
+            openGrades: s.openGrades || {},
+            openAnswer: s.openAnswer || '',
+            openScore: s.openScore != null ? s.openScore : null,
+            openComment: s.openComment || '',
+            closedScore: s.closedScore != null ? s.closedScore : null,
+            graded: s.graded != null ? s.graded : false,
+            startedAt: s.startedAt != null ? s.startedAt : null,
+            submittedAt: s.submittedAt != null ? s.submittedAt : null,
+            resumeAllowed: s.resumeAllowed != null ? s.resumeAllowed : false
+        });
+
+        /* =====================================================================
+           ICONE
+        ===================================================================== */
+        const Icon = ({ name, size = 20, className = "" }) => {
+            const p = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", xmlns: "http://www.w3.org/2000/svg" };
+            const icons = {
+                prev: <svg {...p}><polyline points="15 18 9 12 15 6"/></svg>,
+                next: <svg {...p}><polyline points="9 18 15 12 9 6"/></svg>,
+                check: <svg {...p}><polyline points="20 6 9 17 4 12"/></svg>,
+                x: <svg {...p}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+                alert: <svg {...p}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>,
+                lock: <svg {...p}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>,
+                unlock: <svg {...p}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>,
+                send: <svg {...p}><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>,
+                medal: <svg {...p}><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></svg>,
+                users: <svg {...p}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
+                edit: <svg {...p}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
+                print: <svg {...p}><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>,
+                trash: <svg {...p}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>,
+                eye: <svg {...p}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>,
+                logout: <svg {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
+                chevron: <svg {...p}><polyline points="6 9 12 15 18 9"/></svg>,
+                clock: <svg {...p}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
+                shield: <svg {...p}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
+                key: <svg {...p}><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>,
+                archive: <svg {...p}><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>,
+                upload: <svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
+                download: <svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
+                refresh: <svg {...p}><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            };
+            return <span className={className}>{icons[name]}</span>;
+        };
+
+        const Signature = ({ light, title }) => (
+            <div className="mt-8 mb-4 text-center opacity-80 select-none no-print">
+                <div className={`${light ? 'text-white' : 'text-[#57534a]'} font-bold tracking-widest text-sm`}>{title ? title : 'ARTE BIANCA DI NEIVE'}</div>
+            </div>
+        );
+
+        const StatusBadge = ({ status }) => {
+            const map = {
+                idle:      { t: "Non iniziato", c: "bg-gray-100 text-gray-500" },
+                playing:   { t: "In corso",     c: "bg-[#aec8ce]/40 text-[#57534a]" },
+                locked:    { t: "Bloccato",     c: "bg-[#b4472f]/10 text-[#b4472f]" },
+                submitted: { t: "Consegnato",   c: "bg-[#ebc871]/30 text-[#7a5c14]" },
+                published: { t: "Pubblicato",   c: "bg-[#5c8b73]/15 text-[#3f6a52]" }
+            };
+            const s = map[status] || map.idle;
+            return <span className={`text-xs font-bold px-2.5 py-1 rounded-full whitespace-nowrap ${s.c}`}>{s.t}</span>;
+        };
+
+        const Modal = ({ children, onClose, maxW = "max-w-md" }) => (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm fade-in no-print" onClick={onClose}>
+                <div className={`w-full ${maxW} bg-white rounded-3xl shadow-lg p-7 bounce-in`} onClick={e => e.stopPropagation()}>
+                    {children}
+                </div>
+            </div>
+        );
+
+        /* =====================================================================
+           COMPONENTI GRAFICI PER LE DOMANDE
+        ===================================================================== */
+        const SingleChoice = ({ q, answer, onAnswer, locked, reveal, order }) => {
+            const display = (order && order.length === q.options.length) ? order : q.options.map((_, i) => i);
+            return (
+                <div className="space-y-3">
+                    {display.map((origIdx) => {
+                        const opt = q.options[origIdx];
+                        const isSelected = answer?.selection === origIdx;
+                        const isCorrect = origIdx === q.correctIndex;
+                        let style = "bg-white border border-gray-200 text-[#262420]";
+                        let icon = null;
+                        if (reveal) {
+                            if (isCorrect) { style = "bg-[#5c8b73] text-white border-[#5c8b73]"; icon = "check"; }
+                            else if (isSelected) { style = "bg-[#b4472f] text-white border-[#b4472f]"; icon = "x"; }
+                            else { style = "bg-gray-50 text-gray-400 border-transparent opacity-70"; }
+                        } else if (isSelected) {
+                            style = "bg-[#aec8ce] border-[#57534a] text-[#262420] shadow-md";
+                        }
+                        const interactive = !locked && !reveal;
+                        return (
+                            <div key={origIdx} onClick={() => interactive && onAnswer(q.id, origIdx)}
+                                className={`p-4 rounded-xl shadow-sm transition-all flex items-center justify-between ${style} ${interactive ? 'cursor-pointer hover:border-[#57534a] hover:shadow-md' : 'cursor-default'}`}>
+                                <div className="flex items-center w-full">
+                                    <div className={`w-5 h-5 rounded-full border-2 mr-4 flex items-center justify-center flex-shrink-0 ${(isSelected || (reveal && isCorrect)) ? 'border-white/60' : 'border-gray-300'}`}>
+                                        {(isSelected || (reveal && isCorrect)) && <div className={`w-2.5 h-2.5 rounded-full ${reveal ? 'bg-white' : 'bg-[#57534a]'}`}></div>}
+                                    </div>
+                                    <span className="font-medium text-sm md:text-base leading-snug">{opt}</span>
+                                </div>
+                                {icon && <Icon name={icon} size={20} className="text-white ml-2 flex-shrink-0"/>}
+                            </div>
+                        );
+                    })}
+                </div>
+            );
+        };
+
+        const OpenAnswer = ({ value, onChange, locked, maxLength = 400 }) => {
+            // Blocco "incolla" indipendente dal dispositivo: se in un solo inserimento
+            // entrano troppi caratteri insieme (tipico dell'incolla), lo rifiutiamo.
+            // La digitazione normale e i suggerimenti/correzioni della tastiera (poche
+            // lettere o una parola alla volta) restano consentiti.
+            const SOGLIA_BLOCCO = 25;
+            const handleChange = (e) => {
+                const next = e.target.value;
+                const prev = value || '';
+                if (next.length - prev.length > SOGLIA_BLOCCO) {
+                    // inserimento in blocco: non aggiorno lo stato, il testo non entra
+                    return;
+                }
+                onChange(next);
+            };
+            return (
+                <div>
+                    <textarea value={value} disabled={locked} maxLength={maxLength}
+                        onChange={handleChange}
+                        onPaste={e => e.preventDefault()}
+                        onDrop={e => e.preventDefault()}
+                        onContextMenu={e => e.preventDefault()}
+                        autoComplete="off" autoCorrect="off" autoCapitalize="sentences" spellCheck={false}
+                        rows={7} placeholder="Scrivi qui la tua risposta argomentata…"
+                        className="w-full p-4 rounded-xl border-2 border-gray-200 focus:border-[#57534a] outline-none resize-none text-sm md:text-base leading-relaxed disabled:bg-gray-50" />
+                    <div className="text-xs text-[#827f75] mt-2 flex items-center justify-between">
+                        <span className="flex items-center gap-1"><Icon name="alert" size={13}/> Incolla e trascinamento disattivati.</span>
+                        <span>{(value || '').length} / {maxLength}</span>
+                    </div>
+                </div>
+            );
+        };
+
+        const MultiChoice = ({ q, answer, onToggle, order, locked, reveal }) => {
+            const sel = (answer && Array.isArray(answer.selection)) ? answer.selection : [];
+            const display = (order && order.length === q.options.length) ? order : q.options.map((_, i) => i);
+            return (
+                <div>
+                    {!reveal && <div className="text-xs font-semibold text-[#827f75] mb-2 flex items-center gap-1"><Icon name="alert" size={13}/> Seleziona esattamente 2 opzioni.</div>}
+                    <div className="space-y-3">
+                    {display.map((origIdx) => {
+                        const opt = q.options[origIdx];
+                        const picked = sel.includes(origIdx);
+                        const isCorrect = (q.correctIndices || []).includes(origIdx);
+                        let style = "bg-white border border-gray-200 text-[#262420]";
+                        let icon = null;
+                        if (reveal) {
+                            if (isCorrect) { style = "bg-[#5c8b73] text-white border-[#5c8b73]"; icon = "check"; }
+                            else if (picked) { style = "bg-[#b4472f] text-white border-[#b4472f]"; icon = "x"; }
+                            else { style = "bg-gray-50 text-gray-400 border-transparent opacity-70"; }
+                        } else if (picked) {
+                            style = "bg-[#aec8ce] border-[#57534a] text-[#262420] shadow-md";
+                        }
+                        const interactive = !locked && !reveal;
+                        return (
+                            <div key={origIdx} onClick={() => interactive && onToggle(q.id, origIdx)}
+                                className={`p-4 rounded-xl shadow-sm transition-all flex items-center justify-between ${style} ${interactive ? 'cursor-pointer hover:border-[#57534a] hover:shadow-md' : 'cursor-default'}`}>
+                                <div className="flex items-center w-full">
+                                    <div className={`w-5 h-5 rounded-md border-2 mr-4 flex items-center justify-center flex-shrink-0 ${(picked || (reveal && isCorrect)) ? 'border-white/60' : 'border-gray-300'}`}>
+                                        {(picked || (reveal && isCorrect)) && <div className={`w-2.5 h-2.5 rounded-sm ${reveal ? 'bg-white' : 'bg-[#57534a]'}`}></div>}
+                                    </div>
+                                    <span className="font-medium text-sm md:text-base leading-snug">{opt}</span>
+                                </div>
+                                {icon && <Icon name={icon} size={20} className="text-white ml-2 flex-shrink-0"/>}
+                            </div>
+                        );
+                    })}
+                    </div>
+                </div>
+            );
+        };
+
+        const Matching = ({ q, answer, onPick, order, locked, reveal }) => {
+            const pairs = q.pairs || [];
+            const sel = (answer && answer.selection && typeof answer.selection === 'object') ? answer.selection : {};
+            const itemsOrder = (order && order.items && order.items.length === pairs.length) ? order.items : pairs.map((_, i) => i);
+            const optsOrder = (order && order.opts && order.opts.length === pairs.length) ? order.opts : pairs.map((_, i) => i);
+            const matchOptions = optsOrder.map(i => pairs[i].match);
+            return (
+                <div className="space-y-3">
+                    {itemsOrder.map((i) => {
+                        const p = pairs[i];
+                        const chosen = sel[p.item] || "";
+                        const ok = chosen === p.match;
+                        let rowStyle = "border-gray-200";
+                        if (reveal) rowStyle = chosen ? (ok ? "border-[#5c8b73] bg-[#5c8b73]/5" : "border-[#b4472f] bg-[#b4472f]/5") : "border-gray-300";
+                        return (
+                            <div key={p.item} className={`p-3 rounded-xl border ${rowStyle}`}>
+                                <div className="font-semibold text-sm text-[#262420] mb-2">{p.item}</div>
+                                {!reveal ? (
+                                    <select value={chosen} disabled={locked} onChange={(e) => onPick(q.id, p.item, e.target.value)}
+                                        className="w-full p-2.5 rounded-lg border-2 border-gray-200 focus:border-[#57534a] outline-none text-sm bg-white">
+                                        <option value="">— scegli —</option>
+                                        {matchOptions.map((m, k) => <option key={k} value={m}>{m}</option>)}
+                                    </select>
+                                ) : (
+                                    <div className="text-sm">
+                                        <div className={ok ? "text-[#3f6a52] font-semibold" : "text-[#b4472f] font-semibold"}>
+                                            {chosen || <span className="italic text-gray-400">nessuna scelta</span>} {chosen ? (ok ? "\u2713" : "\u2717") : ""}
+                                        </div>
+                                        {!ok && <div className="text-[#57534a] text-xs mt-1">Corretto: {p.match}</div>}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            );
+        };
+
+        const OpenReview = ({ q, student, reveal }) => {
+            const a = student.answers && student.answers[q.id];
+            const text = (a && typeof a.selection === 'string') ? a.selection : '';
+            const g = student.openGrades && student.openGrades[q.id];
+            return (
+                <div>
+                    <div className="bg-gray-50 rounded-xl p-4 text-sm text-[#262420] whitespace-pre-wrap leading-relaxed">{text || <span className="italic text-gray-400">Nessuna risposta fornita.</span>}</div>
+                    {reveal && g && g.comment && (
+                        <div className="bg-[#aec8ce]/20 rounded-xl p-4 text-sm mt-3">
+                            <div className="text-xs font-bold text-[#57534a] uppercase mb-1">Commento del docente</div>
+                            <div className="text-[#262420] leading-relaxed whitespace-pre-wrap">{g.comment}</div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const Landing = ({ onStudent, onAdmin }) => {
+            const [pin, setPin] = useState("");
+            const [err, setErr] = useState("");
+            const [adminPwOpen, setAdminPwOpen] = useState(false);
+            const [pw, setPw] = useState("");
+            const [pwErr, setPwErr] = useState(false);
+
+            const submitPin = () => {
+                const clean = pin.trim().toLowerCase();
+                if (clean === "admin") { setAdminPwOpen(true); return; }
+                if (!/^\d{5}$/.test(pin.trim())) { setErr("Il PIN deve essere di 5 cifre."); return; }
+                onStudent(pin.trim(), (res) => { if (!res.ok) setErr(res.msg); });
+            };
+
+            const submitPw = () => {
+                if (pw === ADMIN_PASSWORD) { onAdmin(); }
+                else { setPwErr(true); setPw(""); }
+            };
+
+            return (
+                <div className="flex-grow flex flex-col items-center justify-center p-5 fade-in">
+                    <div className="w-full max-w-sm bg-white rounded-[2rem] shadow-card border border-gray-100 p-8 text-center">
+                        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[#57534a] text-white mb-4">
+                            <Icon name="key" size={30} />
+                        </div>
+                        <h1 className="text-2xl font-extrabold text-[#57534a] leading-tight">Accesso alla Verifica</h1>
+                        <p className="text-sm text-[#827f75] mt-2 mb-6">Inserisci il PIN personale a 5 cifre.</p>
+
+                        <input inputMode="numeric" maxLength={5} value={pin} onChange={e => { setPin(e.target.value.replace(/[^0-9a-zA-Z]/g, '')); setErr(""); }} onKeyDown={e => e.key === 'Enter' && submitPin()} placeholder="• • • • •"
+                            className="w-full text-center text-3xl font-extrabold tracking-[0.4em] py-4 rounded-2xl border-2 border-gray-200 focus:border-[#57534a] outline-none transition-colors text-[#57534a]" />
+                        {err && <div className="text-[#b4472f] text-sm font-semibold mt-3">{err}</div>}
+
+                        <button onClick={submitPin} className="w-full mt-5 py-4 rounded-2xl font-bold bg-[#57534a] text-white shadow-lg hover:bg-[#454138] transition-colors scale-hover flex items-center justify-center gap-2">
+                            Entra <Icon name="next" size={18} />
+                        </button>
+                        <button onClick={() => setAdminPwOpen(true)} className="mt-5 text-xs font-semibold text-gray-400 hover:text-[#57534a] inline-flex items-center gap-1"><Icon name="shield" size={14} /> Accesso docente</button>
+                    </div>
+                    <Signature />
+
+                    {adminPwOpen && (
+                        <Modal onClose={() => { setAdminPwOpen(false); setPw(""); setPwErr(false); }}>
+                            <div className="text-center">
+                                <h3 className="text-xl font-extrabold text-[#57534a]">Area Docente</h3>
+                                <p className="text-sm text-[#827f75] mt-1 mb-5">Inserisci la password di accesso.</p>
+                                <input type="password" value={pw} autoFocus onChange={e => { setPw(e.target.value); setPwErr(false); }} onKeyDown={e => e.key === 'Enter' && submitPw()} placeholder="Password"
+                                    className="w-full text-center text-lg font-semibold py-3 rounded-xl border-2 border-gray-200 focus:border-[#57534a] outline-none" />
+                                {pwErr && <div className="text-[#b4472f] text-sm font-semibold mt-3">Password errata.</div>}
+                                <div className="grid grid-cols-2 gap-3 mt-5">
+                                    <button onClick={() => { setAdminPwOpen(false); setPw(""); setPwErr(false); }} className="py-3 rounded-xl font-bold border-2 border-gray-200 text-[#57534a] hover:bg-gray-50">Annulla</button>
+                                    <button onClick={submitPw} className="py-3 rounded-xl font-bold bg-[#57534a] text-white hover:bg-[#454138]">Accedi</button>
+                                </div>
+                            </div>
+                        </Modal>
+                    )}
+                </div>
+            );
+        };
+
+        /* =====================================================================
+           VISUALIZZAZIONE E REVISIONE DELLA PROVA COMPLETA
+        ===================================================================== */
+        const ReviewExam = ({ student, cls, reveal, questions, maxClosed, maxOpen, maxTotal }) => {
+            const bd = computeBreakdown(student, questions);
+            const total = bd.total;
+            const percent = bd.totalMax ? Math.round(bd.percent) : 0;
+            const passed = percent >= SOGLIA_SUFFICIENZA;
+            const ordered = orderedQuestions(student, questions);
+            const answeredCount = questions.filter(q => isAnswered(q, student)).length;
+            const hasClosed = bd.closedMax > 0;
+            const hasOpen = bd.openMax > 0;
+
+            return (
+                <div>
+                    <div className="flex items-center justify-between mb-4">
+                        <div>
+                            <div className="text-xs font-bold text-gray-400 uppercase tracking-widest">Classe {cls} · PIN {student.pin}</div>
+                            <h3 className="text-xl font-extrabold text-[#57534a]">{student.lastName} {student.firstName}</h3>
+                        </div>
+                        {reveal ? (
+                            <div className="text-center">
+                                <div className="text-[10px] uppercase tracking-widest text-[#827f75] mb-0.5">Esito</div>
+                                <div className={`text-5xl font-extrabold leading-none tracking-tight ${passed ? 'text-[#5c8b73]' : 'text-[#b4472f]'}`}>{percent}%</div>
+                                <div className="mt-1.5 text-[#262420]"><span className="text-sm font-medium">voto </span><span className="text-2xl font-extrabold">{votoFromPercent(bd.percent)}</span></div>
+                            </div>
+                        ) : (
+                            <div className="text-right">
+                                <div className="text-2xl font-extrabold text-[#57534a]">{answeredCount}/{questions.length}</div>
+                                <div className="text-xs font-semibold text-[#827f75]">risposte date</div>
+                            </div>
+                        )}
+                    </div>
+
+                    {reveal && (
+                        <div className="flex flex-wrap gap-2 mb-4 text-xs font-semibold">
+                            {hasClosed && <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#57534a]">Chiuse {fmtN(bd.closedScore)}/{fmtN(bd.closedMax)}</span>}
+                            {hasOpen && <span className="bg-[#b9a6d9]/25 rounded-lg px-3 py-1.5 text-[#5e4e70]">Aperte {fmtN(bd.openScore)}/{fmtN(bd.openMax)}</span>}
+                            <span className="bg-[#57534a] text-white rounded-lg px-3 py-1.5">Totale {fmtN(total)}/{fmtN(bd.totalMax)}</span>
+                        </div>
+                    )}
+
+                    <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+                        {ordered.map((q, i) => {
+                            const a = student.answers ? student.answers[q.id] : null;
+                            const answered = isAnswered(q, student);
+                            const pts = pointsForQuestion(q, student);
+                            const isOpen = q.type === 'open';
+                            let border, badgeClass, badgeText;
+                            if (isOpen) {
+                                border = "border-[#b9a6d9]"; badgeClass = "bg-[#b9a6d9]/25 text-[#5e4e70]"; badgeText = reveal ? `${fmtN(pts)}/${fmtN(q.points)} pt` : "APERTA";
+                            } else if (!reveal) {
+                                border = answered ? "border-[#57534a]" : "border-gray-300";
+                                badgeClass = answered ? "bg-[#aec8ce]/40 text-[#57534a]" : "bg-gray-200 text-gray-600";
+                                badgeText = answered ? "RISPOSTA" : "IN BIANCO";
+                            } else if (!answered) {
+                                border = "border-gray-300"; badgeClass = "bg-gray-200 text-gray-600"; badgeText = "NON RISPOSTA";
+                            } else if (Math.abs(pts - q.points) < 0.01) {
+                                border = "border-[#5c8b73]"; badgeClass = "bg-[#5c8b73]/10 text-[#5c8b73]"; badgeText = "CORRETTA";
+                            } else if (pts > 0) {
+                                border = "border-[#ebc871]"; badgeClass = "bg-[#ebc871]/20 text-[#827f75]"; badgeText = "PARZIALE";
+                            } else {
+                                border = "border-[#b4472f]"; badgeClass = "bg-[#b4472f]/10 text-[#b4472f]"; badgeText = "ERRATA";
+                            }
+                            return (
+                                <div key={q.id} className={`bg-white p-5 rounded-2xl shadow-sm border-l-8 ${border}`}>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda {i+1}</span>
+                                        <span className={`text-xs font-bold px-2 py-1 rounded ${badgeClass}`}>{badgeText}</span>
+                                    </div>
+                                    <p className="font-bold text-[#262420] mb-3 leading-relaxed text-sm md:text-base">{q.question}</p>
+                                    {q.type === 'single' && <SingleChoice q={q} answer={a} onAnswer={()=>{}} order={student.optionOrder?.[q.id]} locked reveal={reveal} />}
+                                    {q.type === 'multi' && <MultiChoice q={q} answer={a} onToggle={()=>{}} order={student.optionOrder?.[q.id]} locked reveal={reveal} />}
+                                    {q.type === 'matching' && <Matching q={q} answer={a} onPick={()=>{}} order={student.matchOrder?.[q.id]} locked reveal={reveal} />}
+                                    {q.type === 'open' && <OpenReview q={q} student={student} reveal={reveal} />}
+                                    {reveal && !isOpen && q.explanation && (
+                                        <div className="mt-4 pt-3 border-t border-gray-100">
+                                            <div className="text-xs font-bold text-[#57534a] uppercase mb-1">Spiegazione</div>
+                                            <p className="text-sm text-[#827f75] leading-relaxed">{q.explanation}</p>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            );
+        };
+
+        const StudentApp = ({ pin, cls, db, onSyncUpdate }) => {
+            const student = db.classes[cls]?.students[pin];
+            const questions = (db.classes[cls] && db.classes[cls].questions) || [];
+            const examTitle = (db.classes[cls] && db.classes[cls].examTitle) || '';
+            const maxClosed = questions.filter(q => q.type === 'single').reduce((a, q) => a + q.points, 0);
+            const openQuestion = questions.find(q => q.type === 'open');
+            const maxOpen = openQuestion ? openQuestion.points : 0;
+            const maxTotal = maxClosed + maxOpen;
+            const [idx, setIdx] = useState(0);
+            const [confirmOpen, setConfirmOpen] = useState(false);
+
+            // Lo sblocco del docente concede UN solo rientro: appena lo studente è di nuovo
+            // "in corso" (sia rientrando col PIN, sia con la pagina che si riapre da sola)
+            // il permesso viene consumato. Se esce ancora, sarà di nuovo bloccato.
+            useEffect(() => {
+                if (student && student.status === 'playing' && student.resumeAllowed) {
+                    onSyncUpdate(cls, pin, { ...student, resumeAllowed: false });
+                }
+            }, [student && student.status, student && student.resumeAllowed]);
+
+            const answer = (qid, selection) => {
+                if (student.status !== 'playing') return;
+                const updatedStudent = { ...student };
+                updatedStudent.answers = { ...updatedStudent.answers, [qid]: { selection } };
+                onSyncUpdate(cls, pin, updatedStudent);
+            };
+
+            const toggleMulti = (qid, idx) => {
+                if (student.status !== 'playing') return;
+                const cur = (student.answers[qid] && Array.isArray(student.answers[qid].selection)) ? student.answers[qid].selection : [];
+                let next;
+                if (cur.includes(idx)) next = cur.filter(x => x !== idx);
+                else if (cur.length >= 2) next = [cur[1], idx];   // mantiene al massimo 2 selezioni
+                else next = [...cur, idx];
+                const updatedStudent = { ...student, answers: { ...student.answers, [qid]: { selection: next } } };
+                onSyncUpdate(cls, pin, updatedStudent);
+            };
+
+            const pickMatch = (qid, itemText, matchText) => {
+                if (student.status !== 'playing') return;
+                const cur = (student.answers[qid] && student.answers[qid].selection && typeof student.answers[qid].selection === 'object') ? student.answers[qid].selection : {};
+                const next = { ...cur, [itemText]: matchText };
+                const updatedStudent = { ...student, answers: { ...student.answers, [qid]: { selection: next } } };
+                onSyncUpdate(cls, pin, updatedStudent);
+            };
+
+            const setOpen = (qid, text) => {
+                if (student.status !== 'playing') return;
+                const updatedStudent = { ...student, answers: { ...student.answers, [qid]: { selection: text } } };
+                onSyncUpdate(cls, pin, updatedStudent);
+            };
+            
+            const consegna = () => {
+                const updatedStudent = { ...student };
+                updatedStudent.status = 'submitted';
+                updatedStudent.submittedAt = Date.now();
+                updatedStudent.closedScore = computeClosedScore(updatedStudent, questions);
+                setConfirmOpen(false);
+                onSyncUpdate(cls, pin, updatedStudent);
+            };
+
+            if (!student || questions.length === 0) {
+                return (
+                    <div className="flex-grow flex flex-col items-center justify-center p-6 text-center">
+                        <div className="text-xl font-bold text-[#57534a]">Caricamento o nessuna prova attiva...</div>
+                    </div>
+                );
+            }
+
+            if (student.status === 'locked') {
+                return (
+                    <div className="flex-grow flex flex-col items-center justify-center p-6 bg-[#b4472f] text-white text-center fade-in min-h-screen">
+                        <div className="pulse-red"><Icon name="lock" size={70} /></div>
+                        <h1 className="text-3xl font-extrabold mt-6">Accesso bloccato</h1>
+                        <p className="mt-3 text-white/90 max-w-xs font-medium">Hai già effettuato l'accesso in precedenza. Per continuare, devi chiedere lo sblocco al docente.</p>
+                        <div className="mt-6 bg-white/15 rounded-2xl px-5 py-3 font-bold tracking-wide">{student.lastName} {student.firstName}</div>
+                    </div>
+                );
+            }
+
+            if (student.status === 'submitted') {
+                return (
+                    <div className="flex-grow flex flex-col items-center justify-center p-6 text-center fade-in">
+                        <div className="w-20 h-20 rounded-full bg-[#ebc871]/25 text-[#7a5c14] flex items-center justify-center"><Icon name="clock" size={42}/></div>
+                        <h1 className="text-2xl font-extrabold text-[#57534a] mt-6">Verifica consegnata</h1>
+                        <p className="mt-3 text-[#827f75] max-w-xs font-medium">La tua prova è stata inviata con successo. Attendi la pubblicazione degli esiti.</p>
+                        <div className="mt-6 bg-gray-100 rounded-2xl px-5 py-3 font-bold text-[#57534a]">{student.lastName} {student.firstName}</div>
+                        <Signature title={examTitle} />
+                    </div>
+                );
+            }
+
+            if (student.status === 'published') {
+                return (
+                    <div className="flex-grow flex flex-col items-center p-4 pt-6 fade-in">
+                        <div className="w-full max-w-2xl">
+                            <ReviewExam student={student} cls={cls} reveal={true} questions={questions} maxClosed={maxClosed} maxOpen={maxOpen} maxTotal={maxTotal} />
+                            <Signature title={examTitle} />
+                        </div>
+                    </div>
+                );
+            }
+
+            const ordered = orderedQuestions(student, questions);
+            const q = ordered[idx] || ordered[0];
+            const ans = student.answers[q.id];
+            const answeredCount = questions.filter(cq => isAnswered(cq, student)).length;
+
+            return (
+                <div className="flex-grow flex flex-col min-h-screen">
+                    <div className="sticky top-0 z-30 bg-[#57534a] text-white shadow-md">
+                        <div className="max-w-2xl mx-auto px-4 py-2 flex items-center justify-between gap-2">
+                            <div className="leading-none min-w-0">
+                                <div className="text-[10px] uppercase tracking-widest text-white/60">Classe {cls}</div>
+                                <div className="text-lg md:text-xl font-extrabold tracking-tight truncate">{student.lastName} {student.firstName}</div>
+                            </div>
+                            {examTitle && <div className="flex-1 text-center px-1 min-w-0"><div className="text-xs md:text-sm font-semibold text-white/85 truncate">{examTitle}</div></div>}
+                            <div className="text-right leading-none flex-shrink-0">
+                                <div className="text-[10px] uppercase tracking-widest text-white/60">Risposte</div>
+                                <div className="text-lg font-extrabold">{answeredCount}/{questions.length}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="flex-grow w-full max-w-2xl mx-auto px-4 py-4 flex flex-col">
+                        <div className="flex flex-wrap gap-1.5 justify-center mb-4">
+                            {ordered.map((qq, i) => (
+                                <button key={qq.id} onClick={() => setIdx(i)}
+                                    className={`w-3 h-3 rounded-full transition-all ${i === idx ? 'ring-2 ring-offset-1 ring-[#57534a] scale-125' : ''} ${isAnswered(qq, student) ? (qq.type === 'open' ? 'bg-[#b9a6d9]' : 'bg-[#57534a]') : 'bg-gray-300'}`} />
+                            ))}
+                        </div>
+
+                        <div className="bg-white rounded-2xl shadow-card border border-gray-100 p-6 flex-grow fade-in" key={q.id}>
+                            <div className="flex items-center justify-between mb-3">
+                                <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda {idx+1} di {ordered.length}</span>
+                                <span className="text-xs font-bold text-[#57534a] bg-gray-100 px-2 py-1 rounded">{fmtN(q.points)} pt</span>
+                            </div>
+                            <p className="font-bold text-[#262420] text-lg mb-5 leading-relaxed">{q.question}</p>
+                            {q.type === 'single' && <SingleChoice q={q} answer={ans} onAnswer={answer} order={student.optionOrder?.[q.id]} />}
+                            {q.type === 'multi' && <MultiChoice q={q} answer={ans} onToggle={toggleMulti} order={student.optionOrder?.[q.id]} />}
+                            {q.type === 'matching' && <Matching q={q} answer={ans} onPick={pickMatch} order={student.matchOrder?.[q.id]} />}
+                            {q.type === 'open' && <OpenAnswer value={ans && typeof ans.selection === 'string' ? ans.selection : ''} onChange={(t) => setOpen(q.id, t)} maxLength={q.maxLength || 400} />}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 mt-4">
+                            <button disabled={idx === 0} onClick={() => setIdx(i => Math.max(0, i-1))} className="py-3.5 rounded-xl font-bold border-2 border-[#57534a] text-[#57534a] disabled:opacity-30 disabled:border-gray-200 disabled:text-gray-300 flex items-center justify-center gap-1"><Icon name="prev" size={18}/> Indietro</button>
+                            {idx < ordered.length - 1 ? <button onClick={() => setIdx(i => Math.min(ordered.length-1, i+1))} className="py-3.5 rounded-xl font-bold bg-[#57534a] text-white hover:bg-[#454138] flex items-center justify-center gap-1">Avanti <Icon name="next" size={18}/></button> : <button onClick={() => setConfirmOpen(true)} className="py-3.5 rounded-xl font-bold bg-[#5c8b73] text-white hover:brightness-95 flex items-center justify-center gap-2"><Icon name="send" size={18}/> Consegna</button>}
+                        </div>
+                    </div>
+
+                    {confirmOpen && (
+                        <Modal onClose={() => setConfirmOpen(false)}>
+                            <div className="text-center">
+                                <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-[#5c8b73]/15 text-[#5c8b73] mb-3"><Icon name="send" size={26}/></div>
+                                <h3 className="text-xl font-extrabold text-[#57534a]">Consegnare la verifica?</h3>
+                                <p className="text-sm text-[#827f75] mt-2 mb-1">Hai risposto a <b>{answeredCount}</b> domande su <b>{questions.length}</b>.</p>
+                                <p className="text-sm text-[#827f75] mb-5">Dopo l'invio non potrai più cambiare le risposte.</p>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button onClick={() => setConfirmOpen(false)} className="py-3 rounded-xl font-bold border-2 border-[#57534a] text-[#57534a] hover:bg-gray-50">Annulla</button>
+                                    <button onClick={consegna} className="py-3 rounded-xl font-bold bg-[#5c8b73] text-white hover:brightness-95">Consegna</button>
+                                </div>
+                            </div>
+                        </Modal>
+                    )}
+                </div>
+            );
+        };
+
+        /* =====================================================================
+           CRUSCOTTO DEL DOCENTE (ADMIN PANEL) E ARCHIVIO
+        ===================================================================== */
+        const AdminApp = ({ db, onSyncUpdate, onResetDB, onExit }) => {
+            const classesList = Object.keys(db.classes || {});
+            const [cls, setCls] = useState(classesList[0] || "");
+            const [grading, setGrading] = useState(null);   
+            const [viewPin, setViewPin] = useState(null);    
+            const [reopenPin, setReopenPin] = useState(null);
+            const [resetOpen, setResetOpen] = useState(false);
+            const [resetText, setResetText] = useState("");
+            const [pubOpen, setPubOpen] = useState(false);
+            const [printingCls, setPrintingCls] = useState(null);
+            
+            const classInputRef = useRef(null);
+            const testInputRef = useRef(null);
+            const backupInputRef = useRef(null);
+
+            useEffect(() => { if (!cls && classesList.length > 0) setCls(classesList[0]); }, [classesList, cls]);
+
+            const classData = db.classes[cls];
+            const students = classData ? Object.values(classData.students).sort((a,b) => (a.lastName+a.firstName).localeCompare(b.lastName+b.firstName)) : [];
+            const questions = (classData && classData.questions) || [];
+            const examTitle = (classData && classData.examTitle) || '';
+            const maxClosed = questions.filter(q => q.type === 'single').reduce((a, q) => a + q.points, 0);
+            const openQuestion = questions.find(q => q.type === 'open');
+            const maxOpen = openQuestion ? openQuestion.points : 0;
+            const maxTotal = maxClosed + maxOpen;
+
+            const handleUploadClasse = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                    try {
+                        const parsed = JSON.parse(reader.result);
+                        if (!parsed.classe || !parsed.alunni) throw new Error("JSON classe non valido");
+                        const newStudents = {};
+                        parsed.alunni.forEach(al => {
+                            newStudents[al.pin] = {
+                                pin: String(al.pin), firstName: al.nome, lastName: al.cognome,
+                                status: 'idle', answers: {}, openAnswer: '', openScore: null,
+                                openComment: '', closedScore: null, graded: false, startedAt: null, submittedAt: null
+                            };
+                        });
+                        const existing = db.classes[parsed.classe];
+                        const updatedClasses = { ...db.classes, [parsed.classe]: { published: false, students: newStudents, questions: (existing && existing.questions) || [], examTitle: (existing && existing.examTitle) || '' } };
+                        onSyncUpdate(null, null, null, updatedClasses);
+                        setCls(parsed.classe);
+                        alert(`Classe ${parsed.classe} caricata correttamente!`);
+                    } catch (err) { alert("Errore nel file JSON della classe."); }
+                };
+                reader.readAsText(file);
+                e.target.value = "";
+            };
+
+            const handleUploadProva = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                if (!cls || !classData) { alert("Seleziona prima la classe a cui vuoi abbinare questa verifica."); e.target.value = ""; return; }
+                const reader = new FileReader();
+                reader.onload = () => {
+                    try {
+                        const parsed = JSON.parse(reader.result);
+                        const domande = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.domande) ? parsed.domande : null);
+                        if (!domande || domande.length === 0) throw new Error("Nessuna domanda trovata.");
+                        const titolo = (!Array.isArray(parsed) && parsed && parsed.titolo) ? String(parsed.titolo) : '';
+                        const updatedClasses = { ...db.classes, [cls]: { ...classData, questions: domande, examTitle: titolo } };
+                        onSyncUpdate(null, null, null, updatedClasses);
+                        alert(`Verifica abbinata alla classe ${cls} (${domande.length} domande${titolo ? ' · ' + titolo : ''}).`);
+                    } catch (err) { alert("Errore nel file JSON dei quesiti."); }
+                };
+                reader.readAsText(file);
+                e.target.value = "";
+            };
+
+            const sblocca = (pin) => {
+                const cur = classData.students[pin];
+                const st = { ...cur, status: 'playing', resumeAllowed: true };
+                if (!st.optionOrder || Object.keys(st.optionOrder).length === 0) st.optionOrder = buildOptionOrder(questions);
+                if (!st.matchOrder || Object.keys(st.matchOrder).length === 0) st.matchOrder = buildMatchOrder(questions);
+                if (!Array.isArray(st.questionOrder) || !st.questionOrder.length) st.questionOrder = buildQuestionOrder(questions);
+                if (!st.openGrades) st.openGrades = {};
+                if (!st.startedAt) st.startedAt = Date.now();
+                onSyncUpdate(cls, pin, st);
+            };
+
+            const saveGrade = (pin, grades) => {
+                const st = { ...classData.students[pin], openGrades: grades };
+                st.graded = allOpenGraded(st, questions);
+                st.closedScore = computeClosedScore(st, questions);
+                onSyncUpdate(cls, pin, st);
+                setGrading(null);
+            };
+
+            const requestGrade = (s) => {
+                if (s.status === 'published') { setReopenPin(s.pin); }   // prova già pubblicata: chiedo conferma di riapertura
+                else setGrading(s.pin);                                  // altrimenti correggo subito, senza blocchi
+            };
+            
+            const doReopen = () => {
+                const pin = reopenPin;
+                const st = { ...classData.students[pin], status: 'submitted' };  // torna "consegnata": lo studente rivede "in attesa"
+                onSyncUpdate(cls, pin, st);
+                setReopenPin(null);
+                setGrading(pin);
+            };
+
+            const pubblica = () => {
+                const updatedStudents = { ...classData.students };
+                Object.keys(updatedStudents).forEach(p => {
+                    if (updatedStudents[p].status === 'submitted' || updatedStudents[p].status === 'published') {
+                        if (updatedStudents[p].closedScore == null) updatedStudents[p].closedScore = computeClosedScore(updatedStudents[p], questions);
+                        updatedStudents[p].status = 'published';
+                    }
+                });
+                const updatedClasses = { ...db.classes, [cls]: { ...classData, published: true, students: updatedStudents } };
+                onSyncUpdate(null, null, null, updatedClasses);
+                setPubOpen(false);
+            };
+
+            const exportPDF = () => { setPrintingCls(cls); };
+
+            const exportArchive = () => {
+                if (!classData) { alert("Seleziona prima una classe."); return; }
+                const svolta = Object.values(classData.students).filter(s => s.status === 'submitted' || s.status === 'published');
+                if (svolta.length === 0) { alert("Nessun alunno ha ancora svolto la verifica in questa classe: non c'e' niente da archiviare."); return; }
+                if (questions.length === 0) { alert("Nessuna verifica caricata: impossibile generare l'archivio."); return; }
+                const html = buildArchiveHTML(cls, classData, questions, maxClosed, maxOpen, maxTotal);
+                downloadFile(html, 'archivio_' + cls + '_' + oggiISO() + '.html', 'text/html');
+            };
+
+            // BACKUP della singola classe (stesso formato dei backup gia' in uso, con in piu' i quesiti)
+            const exportBackup = () => {
+                if (!classData) { alert("Seleziona prima una classe."); return; }
+                const payload = {
+                    app: 'verifiche-arte-bianca',
+                    exportedAt: new Date().toISOString(),
+                    classe: cls,
+                    dati: { published: !!classData.published, students: classData.students },
+                    quesiti: questions,
+                    examTitle: examTitle
+                };
+                downloadFile(JSON.stringify(payload, null, 2), 'backup_' + cls + '_' + oggiISO() + '.json', 'application/json');
+            };
+
+            // BACKUP completo (tutte le classi, ciascuna con la sua verifica): usato anche prima del reset totale
+            const exportFullBackup = () => {
+                const payload = {
+                    app: 'verifiche-arte-bianca', full: true,
+                    exportedAt: new Date().toISOString(),
+                    classes: db.classes
+                };
+                downloadFile(JSON.stringify(payload, null, 2), 'backup_completo_' + oggiISO() + '.json', 'application/json');
+            };
+
+            const handleRestoreBackup = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                    try {
+                        const parsed = JSON.parse(reader.result);
+                        // Backup di singola classe
+                        if (parsed.classe && parsed.dati && parsed.dati.students) {
+                            const studentsNorm = {};
+                            Object.values(parsed.dati.students).forEach(s => { studentsNorm[String(s.pin)] = normalizzaStudente(s); });
+                            const quesitiClasse = (Array.isArray(parsed.quesiti) && parsed.quesiti.length) ? parsed.quesiti : ((db.classes[parsed.classe] && db.classes[parsed.classe].questions) || []);
+                            const titoloClasse = parsed.examTitle || ((db.classes[parsed.classe] && db.classes[parsed.classe].examTitle) || '');
+                            const updatedClasses = { ...db.classes, [parsed.classe]: { published: !!parsed.dati.published, students: studentsNorm, questions: quesitiClasse, examTitle: titoloClasse } };
+                            onSyncUpdate(null, null, null, updatedClasses);
+                            setCls(parsed.classe);
+                            alert("Backup della classe " + parsed.classe + " ripristinato" + ((Array.isArray(parsed.quesiti) && parsed.quesiti.length) ? " (insieme alla verifica abbinata)." : "."));
+                        // Backup completo
+                        } else if (parsed.classes) {
+                            const restored = {};
+                            Object.keys(parsed.classes).forEach(c => {
+                                const studentsNorm = {};
+                                Object.values(parsed.classes[c].students || {}).forEach(s => { studentsNorm[String(s.pin)] = normalizzaStudente(s); });
+                                restored[c] = { published: !!parsed.classes[c].published, students: studentsNorm, questions: (parsed.classes[c].questions || (Array.isArray(parsed.questions) ? parsed.questions : [])), examTitle: (parsed.classes[c].examTitle || '') };
+                            });
+                            onSyncUpdate(null, null, null, restored);
+                            const primo = Object.keys(restored)[0];
+                            if (primo) setCls(primo);
+                            alert("Backup completo ripristinato (" + Object.keys(restored).length + " classi).");
+                        } else {
+                            alert("Questo file non sembra un backup valido dell'applicazione.");
+                        }
+                    } catch (err) { alert("Errore nella lettura del file di backup."); }
+                };
+                reader.readAsText(file);
+                e.target.value = "";
+            };
+
+            const doReset = () => {
+                if (!cls || !db.classes[cls]) { setResetOpen(false); setResetText(""); return; }
+                exportBackup();                // sicurezza: scarica il backup di QUESTA classe prima di rimuoverla
+                const updated = { ...db.classes };
+                delete updated[cls];           // rimuovo solo la classe selezionata (con la sua verifica); le altre restano intatte
+                onSyncUpdate(null, null, null, updated);
+                const rimaste = Object.keys(updated);
+                setCls(rimaste[0] || "");
+                setResetOpen(false);
+                setResetText("");
+                alert("Classe " + cls + " rimossa dal cloud (backup scaricato). Le altre classi restano attive.");
+            };
+            
+            useEffect(() => {
+                if (printingCls) {
+                    const t = setTimeout(() => { window.print(); setPrintingCls(null); }, 300);
+                    return () => clearTimeout(t);
+                }
+            }, [printingCls]);
+
+            const gradingStudent = grading ? classData?.students[grading] : null;
+            const counts = students.reduce((acc, s) => { acc[s.status] = (acc[s.status]||0)+1; return acc; }, {});
+
+            return (
+                <div className="flex-grow flex flex-col min-h-screen no-print">
+                    <div className="bg-[#57534a] text-white">
+                        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between flex-wrap gap-3">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center"><Icon name="shield" size={22}/></div>
+                                <div className="leading-tight">
+                                    <div className="font-extrabold text-lg">Cruscotto Docente</div>
+                                    <div className="text-xs text-white/60">Mauro Becattini</div>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                {classesList.length > 0 && (
+                                    <div className="relative">
+                                        <select value={cls} onChange={e => setCls(e.target.value)} className="appearance-none bg-white/10 text-white font-bold rounded-xl pl-4 pr-9 py-2.5 outline-none cursor-pointer hover:bg-white/20">
+                                            {classesList.map(c => <option key={c} value={c} className="text-[#57534a]">Classe {c}</option>)}
+                                        </select>
+                                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"><Icon name="chevron" size={16}/></span>
+                                    </div>
+                                )}
+                                <button onClick={onExit} className="bg-white/10 hover:bg-white/20 rounded-xl px-3 py-2.5 font-bold flex items-center gap-1.5 text-sm"><Icon name="logout" size={16}/> Esci</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="max-w-6xl mx-auto w-full px-4 py-5 flex-grow">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                                <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Caricamento Setup Primario</h4>
+                                <div className="flex gap-2">
+                                    <input type="file" accept=".json" ref={classInputRef} onChange={handleUploadClasse} className="hidden" />
+                                    <button onClick={() => classInputRef.current.click()} className="flex-1 py-3 border-2 border-[#57534a] text-[#57534a] font-bold rounded-xl text-xs flex items-center justify-center gap-2 hover:bg-gray-50"><Icon name="users" size={16}/> Carica Alunni (JSON)</button>
+                                    
+                                    <input type="file" accept=".json" ref={testInputRef} onChange={handleUploadProva} className="hidden" />
+                                    <button onClick={() => testInputRef.current.click()} className="flex-1 py-3 bg-[#57534a] text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 hover:bg-[#454138]"><Icon name="upload" size={16}/> Carica Quesiti (JSON)</button>
+                                </div>
+                            </div>
+                            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-around">
+                                <div className="text-center"><div className="text-2xl font-extrabold text-[#57534a]">{classesList.length}</div><div className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Classi</div></div>
+                                <div className="text-center"><div className="text-2xl font-extrabold text-[#57534a]">{questions.length}</div><div className="text-[10px] font-bold text-gray-400 uppercase tracking-wide">Quesiti caricati</div>{examTitle && <div className="text-[11px] font-semibold text-[#57534a] mt-0.5">({examTitle})</div>}</div>
+                            </div>
+                        </div>
+
+                        {classesList.length > 0 && (
+                            <div className="fade-in">
+                                <div className="flex flex-wrap gap-2 mb-4">
+                                    <button onClick={() => setPubOpen(true)} className="bg-[#5c8b73] text-white font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:brightness-95 scale-hover"><Icon name="eye" size={16}/> Pubblica voti</button>
+                                    <button onClick={exportPDF} className="bg-[#57534a] text-white font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-[#454138] scale-hover"><Icon name="print" size={16}/> Esporta PDF</button>
+                                    <button onClick={exportArchive} className="bg-[#57534a] text-white font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-[#454138] scale-hover"><Icon name="archive" size={16}/> Esporta Archivio HTML</button>
+                                    <button onClick={exportBackup} className="bg-white border-2 border-[#57534a] text-[#57534a] font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-gray-50 scale-hover"><Icon name="download" size={16}/> Scarica Backup</button>
+                                    <input type="file" accept=".json" ref={backupInputRef} onChange={handleRestoreBackup} className="hidden" />
+                                    <button onClick={() => backupInputRef.current.click()} className="bg-white border-2 border-[#57534a] text-[#57534a] font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-gray-50 scale-hover"><Icon name="refresh" size={16}/> Ripristina Backup</button>
+                                    <button onClick={() => setResetOpen(true)} className="bg-white border-2 border-[#b4472f] text-[#b4472f] font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-[#b4472f]/5 scale-hover ml-auto"><Icon name="trash" size={16}/> Reset Classe</button>
+                                </div>
+
+                                <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4">
+                                    {[['idle','Non iniziati'],['playing','In corso'],['locked','Bloccati'],['submitted','Consegnati'],['published','Pubblicati']].map(([k,label]) => (
+                                        <div key={k} className="bg-white rounded-xl shadow-card border border-gray-100 px-3 py-2.5 text-center">
+                                            <div className="text-2xl font-extrabold text-[#57534a]">{counts[k]||0}</div>
+                                            <div className="text-[11px] font-semibold text-[#827f75] uppercase tracking-wide">{label}</div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {classData?.published && <div className="mb-3 bg-[#5c8b73]/10 text-[#3f6a52] text-sm font-semibold rounded-xl px-4 py-2.5 flex items-center gap-2"><Icon name="check" size={16}/> Risultati pubblicati online per la classe {cls}.</div>}
+
+                                <div className="bg-white rounded-2xl shadow-card border border-gray-100 overflow-hidden">
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-sm">
+                                            <thead>
+                                                <tr className="bg-gray-50 text-[#827f75] text-left">
+                                                    <th className="px-4 py-3 font-bold">PIN</th>
+                                                    <th className="px-4 py-3 font-bold">Studente</th>
+                                                    <th className="px-4 py-3 font-bold">Stato</th>
+                                                    <th className="px-4 py-3 font-bold text-center">Chiuse</th>
+                                                    <th className="px-4 py-3 font-bold text-center">Aperte</th>
+                                                    <th className="px-4 py-3 font-bold text-center">Totale</th>
+                                                    <th className="px-4 py-3 font-bold text-center">%</th>
+                                                    <th className="px-4 py-3 font-bold text-center">Voto</th>
+                                                    <th className="px-4 py-3 font-bold text-right">Azioni</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {students.map(s => {
+                                                    const submitted = s.status === 'submitted' || s.status === 'published';
+                                                    const playing = s.status === 'playing';
+                                                    const locked = s.status === 'locked';
+                                                    const answeredCount = questions.filter(q => isAnswered(q, s)).length;
+                                                    const bd = computeBreakdown(s, questions);
+                                                    const hasOpen = bd.openMax > 0;
+                                                    const tot = submitted ? bd.total : null;
+                                                    const canView = submitted || playing;
+                                                    return (
+                                                        <tr key={s.pin} className="border-t border-gray-100 hover:bg-gray-50/60">
+                                                            <td className="px-4 py-3 font-mono font-bold text-[#57534a]">{s.pin}</td>
+                                                            <td className="px-4 py-3 font-semibold text-[#262420] whitespace-nowrap">{s.lastName} {s.firstName}</td>
+                                                            <td className="px-4 py-3">
+                                                                <div className="flex items-center gap-2">
+                                                                    <StatusBadge status={s.status}/>
+                                                                    {playing && <span className="text-xs font-bold text-[#57534a]">{answeredCount}/{questions.length}</span>}
+                                                                </div>
+                                                            </td>
+                                                            <td className="px-4 py-3 text-center font-semibold text-[#57534a]">{submitted ? `${fmtN(bd.closedScore)}/${fmtN(bd.closedMax)}` : '—'}</td>
+                                                            <td className="px-4 py-3 text-center font-semibold">{submitted ? (hasOpen ? (s.graded ? `${fmtN(bd.openScore)}/${fmtN(bd.openMax)}` : <span className="text-[#b4472f]">da valutare</span>) : '—') : '—'}</td>
+                                                            <td className="px-4 py-3 text-center">{tot != null ? <span className="inline-flex items-center gap-1 font-extrabold text-[#57534a]">{fmtN(tot)}/{fmtN(bd.totalMax)}{s.status === 'published' && <Icon name="lock" size={12} className="text-[#5c8b73]" />}</span> : <span className="text-gray-400">—</span>}</td>
+                                                            <td className="px-4 py-3 text-center font-bold text-[#57534a]">{tot != null ? `${Math.round(bd.percent)}%` : '—'}</td>
+                                                            <td className="px-4 py-3 text-center">{tot != null ? <span className={`font-extrabold ${bd.percent >= SOGLIA_SUFFICIENZA ? 'text-[#5c8b73]' : 'text-[#b4472f]'}`}>{votoFromPercent(bd.percent)}</span> : <span className="text-gray-400">—</span>}</td>
+                                                            <td className="px-4 py-3">
+                                                                <div className="flex justify-end gap-1.5 flex-wrap">
+                                                                    {locked && <button onClick={() => sblocca(s.pin)} className="bg-[#aec8ce]/30 text-[#57534a] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-[#aec8ce]/60"><Icon name="unlock" size={14}/> Sblocca</button>}
+                                                                    {canView && <button onClick={() => setViewPin(s.pin)} className="bg-gray-100 text-[#57534a] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-gray-200"><Icon name="eye" size={14}/> Sfoglia</button>}
+                                                                    {submitted && <button onClick={() => requestGrade(s)} className={`rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 ${s.status === 'published' ? 'bg-[#5c8b73]/15 text-[#3f6a52] hover:bg-[#5c8b73]/30' : 'bg-[#ebc871]/30 text-[#7a5c14] hover:bg-[#ebc871]/60'}`}><Icon name={s.status === 'published' ? 'unlock' : 'edit'} size={14}/> {s.status === 'published' ? 'Riapri' : (s.graded ? 'Modifica' : 'Valuta')}</button>}
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {gradingStudent && (
+                        <Modal onClose={() => setGrading(null)} maxW="max-w-3xl">
+                            <GradingForm student={gradingStudent} questions={questions} onSave={saveGrade} onClose={() => setGrading(null)} />
+                        </Modal>
+                    )}
+
+                    {viewPin && classData?.students[viewPin] && (
+                        <Modal onClose={() => setViewPin(null)} maxW="max-w-2xl">
+                            <div className="flex justify-end -mt-2 -mr-2 mb-1"><button onClick={() => setViewPin(null)} className="text-gray-400 hover:text-[#57534a]"><Icon name="x" size={22}/></button></div>
+                            <ReviewExam student={classData.students[viewPin]} cls={cls} reveal={classData.students[viewPin].status === 'submitted' || classData.students[viewPin].status === 'published'} questions={questions} maxClosed={maxClosed} maxOpen={maxOpen} maxTotal={maxTotal} />
+                        </Modal>
+                    )}
+
+                    {reopenPin && (
+                        <Modal onClose={() => setReopenPin(null)}>
+                            <div className="text-center">
+                                <h3 className="text-xl font-extrabold text-[#57534a]">Riaprire la valutazione</h3>
+                                <p className="text-sm text-[#827f75] mt-2 mb-4">Questa prova è già stata pubblicata. Riaprendola potrai modificare i punteggi; lo studente tornerà a vedere <b>"in attesa"</b> finché non ripubblichi i voti.</p>
+                                <div className="grid grid-cols-2 gap-3 mt-5">
+                                    <button onClick={() => setReopenPin(null)} className="py-3 rounded-xl font-bold border-2 border-[#57534a] text-[#57534a] hover:bg-gray-50">Annulla</button>
+                                    <button onClick={doReopen} className="py-3 rounded-xl font-bold bg-[#57534a] text-white hover:bg-[#454138]">Riapri</button>
+                                </div>
+                            </div>
+                        </Modal>
+                    )}
+
+                    {pubOpen && (
+                        <Modal onClose={() => setPubOpen(false)}>
+                            <div className="text-center">
+                                <h3 className="text-xl font-extrabold text-[#57534a]">Pubblicare i voti online?</h3>
+                                <p className="text-sm text-[#827f75] mt-2 mb-5">Gli alunni vedranno i punteggi finali, le spiegazioni e le tue note di correzione.</p>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button onClick={() => setPubOpen(false)} className="py-3 rounded-xl font-bold border-2 border-[#57534a] text-[#57534a] hover:bg-gray-50">Annulla</button>
+                                    <button onClick={pubblica} className="py-3 rounded-xl font-bold bg-[#5c8b73] text-white hover:brightness-95">Sblocca per gli studenti</button>
+                                </div>
+                            </div>
+                        </Modal>
+                    )}
+
+                    {resetOpen && (
+                        <Modal onClose={() => { setResetOpen(false); setResetText(""); }}>
+                            <div className="text-center">
+                                <h3 className="text-xl font-extrabold text-[#b4472f]">Reset della classe {cls}</h3>
+                                <p className="text-sm text-[#827f75] mt-2 mb-4">Questa operazione rimuove dal cloud <b>solo la classe {cls}</b> (alunni, risposte e correzioni); tutte le altre classi restano intatte. Prima della rimozione viene scaricato in automatico un backup di questa classe. Scrivi <span className="font-mono bg-gray-100 px-2 py-0.5 rounded text-[#b4472f]">RESET</span> per confermare.</p>
+                                <input value={resetText} onChange={e => setResetText(e.target.value)} placeholder="RESET" className="w-full text-center text-lg font-bold py-3 rounded-xl border-2 border-gray-200 focus:border-[#b4472f] outline-none mb-4"/>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button onClick={() => { setResetOpen(false); setResetText(""); }} className="py-3 rounded-xl font-bold border-2 border-[#57534a] text-[#57534a] hover:bg-gray-50">Annulla</button>
+                                    <button disabled={resetText !== 'RESET'} onClick={doReset} className="py-3 rounded-xl font-bold bg-[#b4472f] text-white disabled:opacity-30 hover:brightness-95">Rimuovi questa classe</button>
+                                </div>
+                            </div>
+                        </Modal>
+                    )}
+
+                    {printingCls && <PrintArea cls={printingCls} classData={db.classes[printingCls]} questions={questions} maxClosed={maxClosed} maxOpen={maxOpen} maxTotal={maxTotal} />}
+                </div>
+            );
+        };
+
+        const GradingForm = ({ student, questions, onSave, onClose }) => {
+            const opens = questions.filter(q => q.type === 'open');
+            const [grades, setGrades] = useState(() => {
+                const init = {};
+                opens.forEach(q => {
+                    const g = student.openGrades && student.openGrades[q.id];
+                    init[q.id] = { score: (g && g.score != null) ? g.score : 0, comment: (g && g.comment) || "" };
+                });
+                return init;
+            });
+            const setScore = (qid, max, v) => {
+                let n = v === '' ? 0 : parseFloat(v); if (isNaN(n)) n = 0; n = Math.max(0, Math.min(max, n));
+                setGrades(p => ({ ...p, [qid]: { ...p[qid], score: n } }));
+            };
+            const setComment = (qid, c) => setGrades(p => ({ ...p, [qid]: { ...p[qid], comment: c } }));
+            const totalOpen = opens.reduce((t, q) => t + (grades[q.id] ? grades[q.id].score : 0), 0);
+            const maxOpenAll = opens.reduce((t, q) => t + q.points, 0);
+
+            // anteprima live di totale, percentuale e voto, considerando i punteggi che sto digitando ora
+            const liveStudent = { ...student, openGrades: grades };
+            const bd = computeBreakdown(liveStudent, questions);
+            const pct = bd.totalMax ? Math.round(bd.percent) : 0;
+            const passed = bd.percent >= SOGLIA_SUFFICIENZA;
+
+            return (
+                <div>
+                    <div className="flex items-center justify-between mb-1">
+                        <h3 className="text-xl font-extrabold text-[#57534a]">Correzione domande aperte</h3>
+                        <button onClick={onClose} className="text-gray-400 hover:text-[#57534a]"><Icon name="x" size={22}/></button>
+                    </div>
+                    <div className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">{student.lastName} {student.firstName}</div>
+
+                    <div className="bg-[#57534a] text-white rounded-2xl px-5 py-3 mb-4 flex items-center justify-between flex-wrap gap-3">
+                        <div className="flex items-center gap-4 text-sm font-semibold">
+                            <span className="text-white/70">Chiuse <b className="text-white">{fmtN(bd.closedScore)}</b>/{fmtN(bd.closedMax)}</span>
+                            <span className="text-white/70">Aperte <b className="text-white">{fmtN(totalOpen)}</b>/{fmtN(maxOpenAll)}</span>
+                            <span className="text-white/70">Totale <b className="text-white">{fmtN(bd.total)}</b>/{fmtN(bd.totalMax)}</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <div className="text-right"><div className="text-[11px] uppercase tracking-widest text-white/60">Percentuale</div><div className={`text-2xl font-extrabold ${passed ? 'text-[#9cc4ac]' : 'text-[#dd9c92]'}`}>{pct}%</div></div>
+                            <div className="text-right border-l border-white/20 pl-3"><div className="text-[11px] uppercase tracking-widest text-white/60">Voto</div><div className={`text-2xl font-extrabold ${passed ? 'text-[#9cc4ac]' : 'text-[#dd9c92]'}`}>{votoFromPercent(bd.percent)}</div></div>
+                        </div>
+                    </div>
+
+                    <div className="space-y-6 max-h-[52vh] overflow-y-auto pr-1">
+                        {opens.map((q, i) => {
+                            const a = student.answers && student.answers[q.id];
+                            const txt = (a && typeof a.selection === 'string') ? a.selection : '';
+                            return (
+                                <div key={q.id} className="border-b border-gray-100 pb-6 last:border-0">
+                                    <div className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Aperta {i+1} · max {fmtN(q.points)} pt</div>
+                                    <p className="font-bold text-[#262420] mb-2 leading-relaxed text-sm">{q.question}</p>
+                                    <div className="text-xs font-bold text-[#57534a] uppercase mb-1">Risposta dell'alunno</div>
+                                    <div className="bg-gray-50 rounded-xl p-3 text-sm whitespace-pre-wrap leading-relaxed mb-3 max-h-48 overflow-y-auto border">{txt || <span className="italic text-gray-400">Nessun testo presente.</span>}</div>
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <label className="text-sm font-bold text-[#57534a]">Punteggio</label>
+                                        <input type="number" min="0" max={q.points} step="0.1" value={grades[q.id] ? grades[q.id].score : 0}
+                                            onChange={(e) => setScore(q.id, q.points, e.target.value)}
+                                            className="w-24 p-2 rounded-lg border-2 border-gray-200 focus:border-[#57534a] outline-none text-center font-bold"/>
+                                        <span className="text-sm text-[#827f75]">/ {fmtN(q.points)} punti</span>
+                                    </div>
+                                    <div className="text-xs font-bold text-[#57534a] uppercase mb-1">Commento del docente</div>
+                                    <textarea value={grades[q.id] ? grades[q.id].comment : ''} onChange={(e) => setComment(q.id, e.target.value)} rows={6}
+                                        placeholder="Scrivi qui un commento articolato per lo studente e la famiglia (puoi anche incollare un testo lungo)…"
+                                        className="w-full p-3 rounded-xl border-2 border-gray-200 focus:border-[#57534a] outline-none text-sm leading-relaxed resize-y overflow-y-auto min-h-[7rem]"/>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 mt-5">
+                        <button onClick={onClose} className="py-3 rounded-xl font-bold border-2 border-[#57534a] text-[#57534a] hover:bg-gray-50">Annulla</button>
+                        <button onClick={() => onSave(student.pin, grades)} className="py-3 rounded-xl font-bold bg-[#57534a] text-white hover:bg-[#454138]">Registra voti</button>
+                    </div>
+                </div>
+            );
+        };
+
+        const PrintArea = ({ cls, classData, questions, maxClosed, maxOpen, maxTotal }) => {
+            const students = Object.values(classData.students)
+                .filter(s => s.status === 'submitted' || s.status === 'published')
+                .sort((a,b) => (a.lastName+a.firstName).localeCompare(b.lastName+b.firstName));
+
+            const describeAnswer = (q, s) => {
+                const a = s.answers ? s.answers[q.id] : null;
+                const sel = a ? a.selection : null;
+                if (q.type === 'single') {
+                    return <div style={{ marginLeft: 12 }}>
+                        <div>Scelta: {sel != null ? q.options[sel] : <i>Non risposta</i>}</div>
+                        {sel !== q.correctIndex && <div style={{ color: '#57534a' }}>Corretta: {q.options[q.correctIndex]}</div>}
+                    </div>;
+                }
+                if (q.type === 'multi') {
+                    const arr = Array.isArray(sel) ? sel : [];
+                    return <div style={{ marginLeft: 12 }}>
+                        <div>Selezionate: {arr.length ? arr.map(i => q.options[i]).join(' · ') : <i>Nessuna</i>}</div>
+                        <div style={{ color: '#57534a' }}>Corrette: {(q.correctIndices||[]).map(i => q.options[i]).join(' · ')}</div>
+                    </div>;
+                }
+                if (q.type === 'matching') {
+                    return <div style={{ marginLeft: 12 }}>
+                        {(q.pairs||[]).map((p, k) => {
+                            const ch = sel && sel[p.item];
+                            const ok = ch === p.match;
+                            return <div key={k} style={{ color: ok ? '#3f6a52' : '#b4472f' }}>{p.item} → {ch || '—'} {ok ? '✓' : '✗'}{!ok && <span style={{ color: '#57534a' }}> (corretto: {p.match})</span>}</div>;
+                        })}
+                    </div>;
+                }
+                if (q.type === 'open') {
+                    const g = s.openGrades && s.openGrades[q.id];
+                    const txt = (a && typeof a.selection === 'string') ? a.selection : '';
+                    return <div style={{ marginLeft: 12, whiteSpace: 'pre-wrap' }}>
+                        <div>Risposta: {txt || <i>Testo vuoto</i>}</div>
+                        {g && g.comment && <div style={{ marginTop: 4, fontStyle: 'italic', color: '#57534a' }}>Nota docente: {g.comment}</div>}
+                    </div>;
+                }
+                return null;
+            };
+
+            const content = (
+                <div style={{ fontFamily: '"Schibsted Grotesk", sans-serif', color: '#262420' }}>
+                    {students.length === 0 && <div style={{ padding: 20 }}>Nessuna prova consegnata disponibile per la stampa.</div>}
+                    {students.map(s => {
+                        const bd = computeBreakdown(s, questions);
+                        const percent = bd.totalMax ? Math.round(bd.percent) : 0;
+                        const ordered = orderedQuestions(s, questions);
+                        const hasClosed = bd.closedMax > 0, hasOpen = bd.openMax > 0;
+                        return (
+                            <div key={s.pin} className="print-student" style={{ padding: '4mm 0' }}>
+                                <div style={{ borderBottom: '3px solid #57534a', paddingBottom: 8, marginBottom: 14 }}>
+                                    <div style={{ fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: '#827f75' }}>Report Esito Verifiche Live Cloud</div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 4 }}>
+                                        <div style={{ fontSize: 22, fontWeight: 800, color: '#57534a' }}>{s.lastName} {s.firstName}</div>
+                                        <div style={{ fontWeight: 700 }}>Classe {cls} · PIN {s.pin}</div>
+                                    </div>
+                                    <div style={{ marginTop: 6, fontWeight: 700 }}>
+                                        Punteggio: {fmtN(bd.total)}/{fmtN(bd.totalMax)} ({percent}%)
+                                        {hasClosed && <span> — Chiuse {fmtN(bd.closedScore)}/{fmtN(bd.closedMax)}</span>}
+                                        {hasOpen && <span>, Aperte {fmtN(bd.openScore)}/{fmtN(bd.openMax)}</span>}
+                                        {' '}— Voto {votoFromPercent(bd.percent)}
+                                    </div>
+                                </div>
+
+                                {ordered.map((q, i) => {
+                                    const pts = pointsForQuestion(q, s);
+                                    return (
+                                        <div key={q.id} className="print-q" style={{ marginBottom: 10, fontSize: 12 }}>
+                                            <div style={{ fontWeight: 700 }}>{i+1}. {q.question} <span style={{ fontWeight: 800, color: '#57534a' }}>[{fmtN(pts)}/{fmtN(q.points)}]</span></div>
+                                            {describeAnswer(q, s)}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        );
+                    })}
+                </div>
+            );
+            return ReactDOM.createPortal(content, document.getElementById('print-area'));
+        };
+
+        const buildArchiveHTML = (cls, classData, questions, maxClosed, maxOpen, maxTotal) => {
+            // Solo gli alunni che hanno effettivamente svolto la prova (gli assenti restano fuori)
+            const studentsDone = {};
+            Object.values(classData.students).forEach(s => {
+                if (s.status === 'submitted' || s.status === 'published') studentsDone[String(s.pin)] = s;
+            });
+            const examTitle = (classData && classData.examTitle) || '';
+            const payload = { cls, examTitle, generatedAt: new Date().toISOString(), SOGLIA: SOGLIA_SUFFICIENZA, maxClosed, maxOpen, maxTotal, questions, students: studentsDone };
+            const dataJson = JSON.stringify(payload).replace(/</g, '\\u003c');
+
+            const archScript = `
+                const { useState } = React;
+                const D = window.__ARCHIVE__;
+                const Q = D.questions;
+                const SOGLIA = D.SOGLIA;
+                const fmtN = function(n){ return parseFloat(Number(n||0).toFixed(2)).toString().replace('.', ','); };
+                const votoFromPercent = function(percent){
+                    var p = Math.round(percent);
+                    if (p <= 30) return "3";
+                    var t = [[41,"4"],[43,"4+"],[46,"4,5"],[48,"5-"],[51,"5"],[53,"5+"],[56,"5,5"],[58,"6-"],[61,"6"],[63,"6+"],[66,"6,5"],[68,"7-"],[71,"7"],[73,"7+"],[76,"7,5"],[78,"8-"],[81,"8"],[83,"8+"],[86,"8,5"],[88,"9-"],[91,"9"],[93,"9+"],[96,"9,5"],[98,"10-"],[100,"10"]];
+                    for (var k=0;k<t.length;k++){ if (p<=t[k][0]) return t[k][1]; }
+                    return "10";
+                };
+                const pointsFor = function(q, s){
+                    if(q.type==='open'){ var g=s.openGrades&&s.openGrades[q.id]; return (g&&g.score!=null)?g.score:0; }
+                    var a=s.answers&&s.answers[q.id]; if(!a||a.selection==null) return 0; var sel=a.selection;
+                    if(q.type==='single') return sel===q.correctIndex?q.points:0;
+                    if(q.type==='multi'){ if(!Array.isArray(sel)) return 0; var c=sel.filter(function(i){return (q.correctIndices||[]).indexOf(i)>=0;}).length; var w=sel.length-c; if(w===0&&c===2) return q.points; if(w===0&&c===1) return 0.5; return 0; }
+                    if(q.type==='matching'){ var pairs=q.pairs||[]; var tot=pairs.length||4; var ok=0; pairs.forEach(function(p){ if(sel&&sel[p.item]===p.match) ok++; }); if(ok===tot) return q.points; if(ok>=2) return 0.5; return 0; }
+                    return 0;
+                };
+                const breakdown = function(s){
+                    var cs=0,cm=0,os=0,om=0;
+                    Q.forEach(function(q){ var p=pointsFor(q,s); if(q.type==='open'){os+=p;om+=q.points;} else {cs+=p;cm+=q.points;} });
+                    var total=cs+os, totalMax=cm+om;
+                    return {closedScore:cs,closedMax:cm,openScore:os,openMax:om,total:total,totalMax:totalMax,percent: totalMax?(total/totalMax*100):0};
+                };
+                const ordered = function(s){
+                    var ord=s.questionOrder; if(Array.isArray(ord)&&ord.length){ var byId={}; Q.forEach(function(q){byId[q.id]=q;}); var list=ord.map(function(id){return byId[id];}).filter(Boolean); Q.forEach(function(q){ if(ord.indexOf(q.id)<0) list.push(q); }); return list; } return Q;
+                };
+                const students = Object.keys(D.students).map(function(k){ return D.students[k]; }).sort(function(a,b){ return (a.lastName+a.firstName).localeCompare(b.lastName+b.firstName); });
+
+                function QView(props){
+                    var q=props.q, s=props.s;
+                    var a=s.answers&&s.answers[q.id];
+                    var sel=a?a.selection:null;
+                    if(q.type==='single' || q.type==='multi'){
+                        var picks = q.type==='multi' ? (Array.isArray(sel)?sel:[]) : (sel!=null?[sel]:[]);
+                        var corr = q.type==='multi' ? (q.correctIndices||[]) : [q.correctIndex];
+                        return (
+                            <div className="space-y-2">
+                                {q.options.map(function(opt,idx){
+                                    var isSel=picks.indexOf(idx)>=0; var isCor=corr.indexOf(idx)>=0;
+                                    var stl="bg-gray-50 text-gray-400 border-transparent";
+                                    if(isCor) stl="bg-[#5c8b73] text-white border-[#5c8b73]";
+                                    else if(isSel) stl="bg-[#b4472f] text-white border-[#b4472f]";
+                                    return <div key={idx} className={"p-3 rounded-xl text-sm font-medium border flex items-center justify-between "+stl}><span>{opt}</span><span className="text-xs font-extrabold">{isCor?"\u2713":(isSel?"\u2717":"")}</span></div>;
+                                })}
+                            </div>
+                        );
+                    }
+                    if(q.type==='matching'){
+                        return (
+                            <div className="space-y-2">
+                                {(q.pairs||[]).map(function(p,k){
+                                    var ch=sel&&sel[p.item]; var ok=ch===p.match;
+                                    return <div key={k} className={"p-3 rounded-xl border text-sm "+(ch?(ok?"border-[#5c8b73] bg-[#5c8b73]/5":"border-[#b4472f] bg-[#b4472f]/5"):"border-gray-300")}><div className="font-semibold text-[#262420]">{p.item}</div><div className={ok?"text-[#3f6a52]":"text-[#b4472f]"}>{ch||"\u2014"} {ch?(ok?"\u2713":"\u2717"):""}</div>{!ok?<div className="text-[#57534a] text-xs mt-1">Corretto: {p.match}</div>:null}</div>;
+                                })}
+                            </div>
+                        );
+                    }
+                    var txt=(a&&typeof a.selection==='string')?a.selection:'';
+                    var g=s.openGrades&&s.openGrades[q.id];
+                    return (
+                        <div>
+                            <div className="bg-gray-50 rounded-xl p-4 text-sm whitespace-pre-wrap leading-relaxed text-[#262420]">{txt||"\u2014"}</div>
+                            {g&&g.comment?<div className="bg-[#aec8ce]/20 rounded-xl p-4 text-sm mt-3"><div className="text-xs font-bold text-[#57534a] uppercase mb-1">Commento del docente</div><div className="text-[#262420] leading-relaxed whitespace-pre-wrap">{g.comment}</div></div>:null}
+                        </div>
+                    );
+                }
+
+                function Dettaglio(props){
+                    var s=props.student; var bd=breakdown(s);
+                    var pct=bd.totalMax?Math.round(bd.percent):0; var voto=votoFromPercent(bd.percent); var passed=pct>=SOGLIA;
+                    var list=ordered(s); var hasClosed=bd.closedMax>0, hasOpen=bd.openMax>0;
+                    return (
+                        <div className="max-w-2xl mx-auto px-4 py-6">
+                            <button onClick={props.back} className="mb-4 text-sm font-bold text-[#57534a] flex items-center gap-1">&larr; Torna all'elenco</button>
+                            <div className="bg-white rounded-3xl shadow-md border border-gray-100 p-7 mb-5">
+                                <div className="flex justify-between items-start">
+                                    <div><div className="text-xs font-bold text-gray-400 uppercase tracking-widest">Classe {D.cls} · PIN {s.pin}</div><h2 className="text-2xl font-extrabold text-[#57534a]">{s.lastName} {s.firstName}</h2></div>
+                                    <div className="text-right"><div className={"text-4xl font-extrabold "+(passed?"text-[#5c8b73]":"text-[#b4472f]")}>{voto}</div><div className="text-xs font-semibold text-[#827f75] mt-1">{fmtN(bd.total)}/{fmtN(bd.totalMax)} · {pct}%</div></div>
+                                </div>
+                                <div className="flex flex-wrap gap-2 mt-3 text-xs font-semibold">
+                                    {hasClosed?<span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#57534a]">Chiuse {fmtN(bd.closedScore)}/{fmtN(bd.closedMax)}</span>:null}
+                                    {hasOpen?<span className="bg-[#b9a6d9]/25 rounded-lg px-3 py-1.5 text-[#5e4e70]">Aperte {fmtN(bd.openScore)}/{fmtN(bd.openMax)}</span>:null}
+                                    <span className="bg-[#57534a] text-white rounded-lg px-3 py-1.5">Totale {fmtN(bd.total)}/{fmtN(bd.totalMax)}</span>
+                                </div>
+                            </div>
+                            {list.map(function(q,i){
+                                var pts=pointsFor(q,s); var isOpen=q.type==='open'; var ans=s.answers&&s.answers[q.id];
+                                var answered = isOpen ? (ans&&typeof ans.selection==='string'&&ans.selection.trim().length>0) : (ans&&ans.selection!=null);
+                                var border, badge, btxt;
+                                if(isOpen){ border="border-[#b9a6d9]"; badge="bg-[#b9a6d9]/25 text-[#5e4e70]"; btxt=fmtN(pts)+"/"+fmtN(q.points)+" pt"; }
+                                else if(!answered){ border="border-gray-300"; badge="bg-gray-200 text-gray-600"; btxt="NON RISPOSTA"; }
+                                else if(Math.abs(pts-q.points)<0.01){ border="border-[#5c8b73]"; badge="bg-[#5c8b73]/10 text-[#5c8b73]"; btxt="CORRETTA"; }
+                                else if(pts>0){ border="border-[#ebc871]"; badge="bg-[#ebc871]/20 text-[#827f75]"; btxt="PARZIALE"; }
+                                else { border="border-[#b4472f]"; badge="bg-[#b4472f]/10 text-[#b4472f]"; btxt="ERRATA"; }
+                                return (
+                                    <div key={q.id} className={"bg-white p-5 rounded-2xl shadow-sm border-l-8 mb-4 "+border}>
+                                        <div className="flex justify-between items-center mb-2"><span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda {i+1}</span><span className={"text-xs font-bold px-2 py-1 rounded "+badge}>{btxt}</span></div>
+                                        <p className="font-bold text-[#262420] mb-3 leading-relaxed">{q.question}</p>
+                                        <QView q={q} s={s} />
+                                        {(!isOpen&&q.explanation)?<div className="mt-4 pt-3 border-t border-gray-100"><div className="text-xs font-bold text-[#57534a] uppercase mb-1">Spiegazione</div><p className="text-sm text-[#827f75] leading-relaxed">{q.explanation}</p></div>:null}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    );
+                }
+
+                function ArchiveApp(){
+                    const [sel,setSel]=useState(null);
+                    if(sel&&D.students[sel]) return <Dettaglio student={D.students[sel]} back={function(){setSel(null);}} />;
+                    return (
+                        <div>
+                            <div className="bg-[#57534a] text-white"><div className="max-w-5xl mx-auto px-4 py-5"><div className="text-[11px] uppercase tracking-widest text-white/60">Arte Bianca di Neive · Archivio verifica{D.examTitle ? " (" + D.examTitle + ")" : ""}</div><div className="text-2xl font-extrabold">Classe {D.cls}</div><div className="text-xs text-white/70 mt-0.5">prof. Mauro Becattini · generato il {new Date(D.generatedAt).toLocaleString('it-IT')} · {students.length} alunni</div></div></div>
+                            <div className="max-w-5xl mx-auto px-4 py-6">
+                                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm text-left">
+                                    <thead className="bg-gray-50 text-[#827f75] text-xs uppercase"><tr><th className="px-4 py-3">PIN</th><th className="px-4 py-3">Studente</th><th className="px-4 py-3 text-center">Chiuse</th><th className="px-4 py-3 text-center">Aperte</th><th className="px-4 py-3 text-center">Totale</th><th className="px-4 py-3 text-center">%</th><th className="px-4 py-3 text-center">Voto</th><th></th></tr></thead>
+                                    <tbody>
+                                        {students.map(function(s){
+                                            var bd=breakdown(s); var pct=bd.totalMax?Math.round(bd.percent):0; var voto=votoFromPercent(bd.percent); var hasOpen=bd.openMax>0;
+                                            return (
+                                                <tr key={s.pin} onClick={function(){setSel(s.pin);}} className="border-t border-gray-100 hover:bg-gray-50 cursor-pointer">
+                                                    <td className="px-4 py-3 font-mono font-bold text-[#57534a]">{s.pin}</td>
+                                                    <td className="px-4 py-3 font-semibold whitespace-nowrap">{s.lastName} {s.firstName}</td>
+                                                    <td className="px-4 py-3 text-center font-semibold text-[#57534a]">{fmtN(bd.closedScore)+"/"+fmtN(bd.closedMax)}</td>
+                                                    <td className="px-4 py-3 text-center font-semibold">{hasOpen?(fmtN(bd.openScore)+"/"+fmtN(bd.openMax)):"\u2014"}</td>
+                                                    <td className="px-4 py-3 text-center font-extrabold text-[#57534a]">{fmtN(bd.total)+"/"+fmtN(bd.totalMax)}</td>
+                                                    <td className={"px-4 py-3 text-center font-extrabold "+(pct>=SOGLIA?"text-[#5c8b73]":"text-[#b4472f]")}>{pct+"%"}</td>
+                                                    <td className="px-4 py-3 text-center font-bold">{voto}</td>
+                                                    <td className="px-4 py-3 text-right text-gray-300">&rsaquo;</td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table></div></div>
+                                <div className="mt-4 text-xs text-[#827f75] text-center">Clicca su un alunno per vedere la verifica completa, con risposte corrette, spiegazioni e correzione delle aperte.</div>
+                            </div>
+                        </div>
+                    );
+                }
+                ReactDOM.createRoot(document.getElementById('root')).render(<ArchiveApp/>);
+            `;
+
+            return [
+                '<!DOCTYPE html>',
+                '<html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">',
+                '<title>Archivio verifica ' + cls + ' \u2014 Arte Bianca di Neive</title>',
+                '<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin><\/script>',
+                '<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin><\/script>',
+                '<script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>',
+                '<script src="https://cdn.tailwindcss.com"><\/script>',
+                '<style>@import url(\'https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..600&family=Schibsted+Grotesk:wght@400;500;600;700&display=swap\');body{font-family:"Schibsted Grotesk",sans-serif;letter-spacing:-0.01em;background:#eef0ea;color:#262420;}h1,h2,h3{font-family:"Fraunces",serif;}</style>',
+                '</head><body><div id="root"></div>',
+                '<script>window.__ARCHIVE__ = ' + dataJson + ';<\/script>',
+                '<script type="text/babel">' + archScript + '<\/script>',
+                '</body></html>'
+            ].join('\n');
+        };
+
+        /* =====================================================================
+           CORE CORE CORE DIRECTING DISPATCHER CON SYNC REALTIME CLOUD
+        ===================================================================== */
+        const App = () => {
+            const [view, setView] = useState('landing'); 
+            const [session, setSession] = useState(null);
+            const [db, setDb] = useState({ version: 1, classes: {} });
+            const [loading, setLoading] = useState(true);
+
+            const pullCloudState = async () => {
+                const { data, error } = await supabase.from('app_state').select('db_data, questions_data').eq('id', 1).single();
+                if (!error && data) {
+                    setDb({ version: 1, classes: data.db_data?.classes || {} });
+                }
+                setLoading(false);
+            };
+
+            useEffect(() => {
+                pullCloudState();
+                const intervalId = setInterval(() => {
+                    pullCloudState();
+                }, 3000);
+                return () => clearInterval(intervalId);
+            }, []);
+
+            useEffect(() => {
+                try {
+                    const raw = sessionStorage.getItem(SESSION_KEY);
+                    if (raw) {
+                        const { pin, cls } = JSON.parse(raw);
+                        setSession({ pin, cls });
+                        setView('student');
+                    }
+                } catch (e) { }
+            }, []);
+
+            const syncUpdateCloud = async (cls, pin, updatedStudentData, fullClasses = null) => {
+                let currentClasses = fullClasses ? fullClasses : { ...db.classes };
+
+                if (cls && pin && updatedStudentData) {
+                    currentClasses[cls].students[pin] = updatedStudentData;
+                }
+
+                setDb({ version: 1, classes: currentClasses });
+                await supabase.from('app_state').update({ db_data: { classes: currentClasses }, questions_data: [] }).eq('id', 1);
+            };
+
+            const resetDatabaseCloud = async () => {
+                setDb({ version: 1, classes: {} });
+                await supabase.from('app_state').update({ db_data: { classes: {} }, questions_data: [] }).eq('id', 1);
+            };
+
+            const handleStudentLogin = (pin, callback) => {
+                const found = findStudent(db.classes, pin);
+                if (!found) { callback({ ok: false, msg: "PIN non censito a sistema." }); return; }
+                const { cls, student } = found;
+
+                if (student.status === 'idle') {
+                    const clsQuestions = (db.classes[cls] && db.classes[cls].questions) || [];
+                    const updated = { 
+                        ...student, 
+                        status: 'playing', 
+                        startedAt: student.startedAt || Date.now(), 
+                        optionOrder: (student.optionOrder && Object.keys(student.optionOrder).length > 0) ? student.optionOrder : buildOptionOrder(clsQuestions),
+                        matchOrder: (student.matchOrder && Object.keys(student.matchOrder).length > 0) ? student.matchOrder : buildMatchOrder(clsQuestions),
+                        questionOrder: (Array.isArray(student.questionOrder) && student.questionOrder.length) ? student.questionOrder : buildQuestionOrder(clsQuestions),
+                        openGrades: student.openGrades || {}
+                    };
+                    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
+                    setSession({ pin, cls }); setView('student');
+                    syncUpdateCloud(cls, pin, updated);
+                    callback({ ok: true });
+                } else if (student.status === 'submitted' || student.status === 'published') {
+                    // Entra senza problemi per vedere la correzione/risultati
+                    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
+                    setSession({ pin, cls }); setView('student');
+                    callback({ ok: true });
+                } else if (student.status === 'playing') {
+                    // Se il docente ha appena sbloccato, concedo UN rientro per riprendere da dove era.
+                    if (student.resumeAllowed) {
+                        const updated = { ...student, resumeAllowed: false };
+                        sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
+                        setSession({ pin, cls }); setView('student');
+                        syncUpdateCloud(cls, pin, updated);
+                        callback({ ok: true });
+                    } else {
+                        // Blocco anti-furbetto: era in corso e sta entrando da un altro dispositivo/scheda
+                        const updated = { ...student, status: 'locked' };
+                        sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
+                        setSession({ pin, cls }); setView('student');
+                        syncUpdateCloud(cls, pin, updated);
+                        callback({ ok: true });
+                    }
+                } else if (student.status === 'locked') {
+                    // Già bloccato, va alla pagina di blocco
+                    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
+                    setSession({ pin, cls }); setView('student');
+                    callback({ ok: true });
+                }
+            };
+
+            if (loading) {
+                return (
+                    <div className="flex-grow flex items-center justify-center bg-[#eef0ea]">
+                        <div className="text-center font-bold text-[#57534a] text-lg">Connessione al Cloud Engine in corso...</div>
+                    </div>
+                );
+            }
+
+            if (view === 'admin') return <AdminApp db={db} onSyncUpdate={syncUpdateCloud} onResetDB={resetDatabaseCloud} onExit={() => setView('landing')} />;
+            if (view === 'student' && session) return <StudentApp pin={session.pin} cls={session.cls} db={db} onSyncUpdate={syncUpdateCloud} onExit={() => { sessionStorage.removeItem(SESSION_KEY); setSession(null); setView('landing'); }} />;
+            return <Landing onStudent={handleStudentLogin} onAdmin={() => setView('admin')} />;
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
