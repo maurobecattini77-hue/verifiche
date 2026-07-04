@@ -474,7 +474,7 @@
                                 ) : (
                                     <div className="text-sm">
                                         <div className={ok ? "text-[#3f6a52] font-semibold" : "text-[#b4472f] font-semibold"}>
-                                            {chosen || <span className="italic text-gray-400">nessuna scelta</span>} {chosen ? (ok ? "\u2713" : "\u2717") : ""}
+                                            {chosen || <span className="italic text-gray-400">nessuna scelta</span>} {chosen ? (ok ? "✓" : "✗") : ""}
                                         </div>
                                         {!ok && <div className="text-[#57534a] text-xs mt-1">Corretto: {p.match}</div>}
                                     </div>
@@ -629,7 +629,15 @@
                                 <div key={q.id} className={`bg-white p-5 rounded-2xl shadow-sm border-l-8 ${border}`}>
                                     <div className="flex justify-between items-center mb-2">
                                         <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda {i+1}</span>
-                                        <span className={`text-xs font-bold px-2 py-1 rounded ${badgeClass}`}>{badgeText}</span>
+                                        <div className="flex items-center gap-1.5">
+                                            {reveal && !isOpen && (() => {
+                                                const full = Math.abs(pts - q.points) < 0.01;
+                                                const zero = pts <= 0.001;
+                                                const ptsClass = full ? 'bg-[#5c8b73]/15 text-[#3f6a52]' : (zero ? 'bg-[#b4472f]/10 text-[#b4472f]' : 'bg-gray-100 text-[#57534a]');
+                                                return <span className={`text-xs font-bold px-2 py-1 rounded ${ptsClass}`}>{fmtN(pts)} / {fmtN(q.points)}</span>;
+                                            })()}
+                                            <span className={`text-xs font-bold px-2 py-1 rounded ${badgeClass}`}>{badgeText}</span>
+                                        </div>
                                     </div>
                                     <p className="font-bold text-[#262420] mb-3 leading-relaxed text-sm md:text-base">{q.question}</p>
                                     {q.type === 'single' && <SingleChoice q={q} answer={a} onAnswer={()=>{}} order={student.optionOrder?.[q.id]} locked reveal={reveal} />}
@@ -654,6 +662,7 @@
             const student = db.classes[cls]?.students[pin];
             const questions = (db.classes[cls] && db.classes[cls].questions) || [];
             const examTitle = (db.classes[cls] && db.classes[cls].examTitle) || '';
+            const esercitazione = !!(db.classes[cls] && db.classes[cls].esercitazione);
             const maxClosed = questions.filter(q => q.type === 'single').reduce((a, q) => a + q.points, 0);
             const openQuestion = questions.find(q => q.type === 'open');
             const maxOpen = openQuestion ? openQuestion.points : 0;
@@ -704,10 +713,36 @@
             
             const consegna = () => {
                 const updatedStudent = { ...student };
-                updatedStudent.status = 'submitted';
+                // In esercitazione la prova va subito pubblicata: lo studente vede voto e correzione.
+                updatedStudent.status = esercitazione ? 'published' : 'submitted';
                 updatedStudent.submittedAt = Date.now();
                 updatedStudent.closedScore = computeClosedScore(updatedStudent, questions);
+                updatedStudent.forced = false;   // consegna volontaria: non è forzata
                 setConfirmOpen(false);
+                onSyncUpdate(cls, pin, updatedStudent);
+            };
+
+            // ESERCITAZIONE: azzera lo studente per un nuovo tentativo (sovrascrive il precedente).
+            const riprova = () => {
+                const updatedStudent = {
+                    ...student,
+                    status: 'playing',
+                    answers: {},
+                    openAnswer: '',
+                    openScore: null,
+                    closedScore: null,
+                    openComment: '',
+                    openGrades: {},
+                    graded: false,
+                    forced: false,
+                    submittedAt: null,
+                    startedAt: Date.now(),
+                    resumeAllowed: false,
+                    optionOrder: buildOptionOrder(questions),
+                    matchOrder: buildMatchOrder(questions),
+                    questionOrder: buildQuestionOrder(questions)
+                };
+                setIdx(0);
                 onSyncUpdate(cls, pin, updatedStudent);
             };
 
@@ -747,6 +782,12 @@
                     <div className="flex-grow flex flex-col items-center p-4 pt-6 fade-in">
                         <div className="w-full max-w-2xl">
                             <ReviewExam student={student} cls={cls} reveal={true} questions={questions} maxClosed={maxClosed} maxOpen={maxOpen} maxTotal={maxTotal} />
+                            {esercitazione && (
+                                <div className="mt-5">
+                                    <button onClick={riprova} className="w-full py-4 rounded-2xl font-bold bg-[#5c8b73] text-white shadow-lg hover:brightness-95 transition scale-hover flex items-center justify-center gap-2"><Icon name="refresh" size={20}/> Riprova · Nuova esercitazione</button>
+                                    <p className="text-center text-xs text-[#827f75] mt-2">Il nuovo tentativo sostituisce quello precedente.</p>
+                                </div>
+                            )}
                             <Signature title={examTitle} />
                         </div>
                     </div>
@@ -763,7 +804,7 @@
                     <div className="sticky top-0 z-30 bg-[#57534a] text-white shadow-md">
                         <div className="max-w-2xl mx-auto px-4 py-2 flex items-center justify-between gap-2">
                             <div className="leading-none min-w-0">
-                                <div className="text-[10px] uppercase tracking-widest text-white/60">Classe {cls}</div>
+                                <div className="text-[10px] uppercase tracking-widest text-white/60">Classe {cls}{esercitazione ? ' · Esercitazione' : ''}</div>
                                 <div className="text-lg md:text-xl font-extrabold tracking-tight truncate">{student.lastName} {student.firstName}</div>
                             </div>
                             {examTitle && <div className="flex-1 text-center px-1 min-w-0"><div className="text-xs md:text-sm font-semibold text-white/85 truncate">{examTitle}</div></div>}
@@ -806,7 +847,7 @@
                                 <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-[#5c8b73]/15 text-[#5c8b73] mb-3"><Icon name="send" size={26}/></div>
                                 <h3 className="text-xl font-extrabold text-[#57534a]">Consegnare la verifica?</h3>
                                 <p className="text-sm text-[#827f75] mt-2 mb-1">Hai risposto a <b>{answeredCount}</b> domande su <b>{questions.length}</b>.</p>
-                                <p className="text-sm text-[#827f75] mb-5">Dopo l'invio non potrai più cambiare le risposte.</p>
+                                <p className="text-sm text-[#827f75] mb-5">{esercitazione ? 'Dopo l’invio vedrai subito il tuo esito e la correzione.' : 'Dopo l’invio non potrai più cambiare le risposte.'}</p>
                                 <div className="grid grid-cols-2 gap-3">
                                     <button onClick={() => setConfirmOpen(false)} className="py-3 rounded-xl font-bold border-2 border-[#57534a] text-[#57534a] hover:bg-gray-50">Annulla</button>
                                     <button onClick={consegna} className="py-3 rounded-xl font-bold bg-[#5c8b73] text-white hover:brightness-95">Consegna</button>
@@ -831,7 +872,9 @@
             const [resetText, setResetText] = useState("");
             const [pubOpen, setPubOpen] = useState(false);
             const [printingCls, setPrintingCls] = useState(null);
-            
+            const [forceAllOpen, setForceAllOpen] = useState(false);
+            const [undoAllOpen, setUndoAllOpen] = useState(false);
+
             const classInputRef = useRef(null);
             const testInputRef = useRef(null);
             const backupInputRef = useRef(null);
@@ -839,6 +882,7 @@
             useEffect(() => { if (!cls && classesList.length > 0) setCls(classesList[0]); }, [classesList, cls]);
 
             const classData = db.classes[cls];
+            const esercitazione = !!(classData && classData.esercitazione);
             const students = classData ? Object.values(classData.students).sort((a,b) => (a.lastName+a.firstName).localeCompare(b.lastName+b.firstName)) : [];
             const questions = (classData && classData.questions) || [];
             const examTitle = (classData && classData.examTitle) || '';
@@ -864,7 +908,7 @@
                             };
                         });
                         const existing = db.classes[parsed.classe];
-                        const updatedClasses = { ...db.classes, [parsed.classe]: { published: false, students: newStudents, questions: (existing && existing.questions) || [], examTitle: (existing && existing.examTitle) || '' } };
+                        const updatedClasses = { ...db.classes, [parsed.classe]: { published: false, esercitazione: (existing && existing.esercitazione) || false, students: newStudents, questions: (existing && existing.questions) || [], examTitle: (existing && existing.examTitle) || '' } };
                         onSyncUpdate(null, null, null, updatedClasses);
                         setCls(parsed.classe);
                         alert(`Classe ${parsed.classe} caricata correttamente!`);
@@ -894,6 +938,13 @@
                 e.target.value = "";
             };
 
+            // ESERCITAZIONE: attiva/disattiva la modalità esercitazione per la classe selezionata.
+            const toggleEsercitazione = () => {
+                if (!classData) return;
+                const updatedClasses = { ...db.classes, [cls]: { ...classData, esercitazione: !esercitazione } };
+                onSyncUpdate(null, null, null, updatedClasses);
+            };
+
             const sblocca = (pin) => {
                 const cur = classData.students[pin];
                 const st = { ...cur, status: 'playing', resumeAllowed: true };
@@ -903,6 +954,76 @@
                 if (!st.openGrades) st.openGrades = {};
                 if (!st.startedAt) st.startedAt = Date.now();
                 onSyncUpdate(cls, pin, st);
+            };
+
+            // CONSEGNA FORZATA (singolo studente 'playing'): stesso effetto della consegna volontaria.
+            // In esercitazione -> published (voto immediato); in verifica -> submitted (nessun voto automatico).
+            const consegnaForzata = (pin) => {
+                const cur = classData.students[pin];
+                if (!cur || cur.status !== 'playing') return;
+                const st = { ...cur };
+                st.status = esercitazione ? 'published' : 'submitted';
+                st.submittedAt = Date.now();
+                st.closedScore = computeClosedScore(st, questions);
+                st.forced = true;   // consegna forzata: marchio per poterla annullare
+                onSyncUpdate(cls, pin, st);
+            };
+
+            // CONSEGNA FORZATA per tutta la classe: chiude in un colpo tutti gli studenti 'playing'.
+            const consegnaForzataClasse = () => {
+                if (!classData) { setForceAllOpen(false); return; }
+                const updatedStudents = { ...classData.students };
+                Object.keys(updatedStudents).forEach(p => {
+                    if (updatedStudents[p].status === 'playing') {
+                        const st = { ...updatedStudents[p] };
+                        st.status = esercitazione ? 'published' : 'submitted';
+                        st.submittedAt = Date.now();
+                        st.closedScore = computeClosedScore(st, questions);
+                        st.forced = true;   // consegna forzata: marchio per poterla annullare
+                        updatedStudents[p] = st;
+                    }
+                });
+                const updatedClasses = { ...db.classes, [cls]: { ...classData, students: updatedStudents } };
+                onSyncUpdate(null, null, null, updatedClasses);
+                setForceAllOpen(false);
+            };
+
+            // RIMETTE IN CORSO un singolo studente consegnato/pubblicato SENZA toccare le risposte.
+            // Serve ad ANNULLARE una consegna forzata fatta per errore: l'alunno ritrova esattamente
+            // il suo compito (answers, openAnswer, ordini) e continua da dove era.
+            const riprendi = (pin) => {
+                const cur = classData.students[pin];
+                if (!cur) return;
+                const st = { ...cur };
+                st.status = 'playing';
+                st.resumeAllowed = true;
+                st.submittedAt = null;
+                st.closedScore = null;
+                st.graded = false;
+                delete st.forced;   // non è più una consegna forzata pendente
+                // answers, openAnswer, optionOrder, matchOrder, questionOrder restano INTATTI
+                onSyncUpdate(cls, pin, st);
+            };
+
+            // ANNULLA CONSEGNA per tutta la classe: rimette in corso tutti gli studenti con forced:true.
+            const annullaConsegnaClasse = () => {
+                if (!classData) { setUndoAllOpen(false); return; }
+                const updatedStudents = { ...classData.students };
+                Object.keys(updatedStudents).forEach(p => {
+                    if (updatedStudents[p].forced) {
+                        const st = { ...updatedStudents[p] };
+                        st.status = 'playing';
+                        st.resumeAllowed = true;
+                        st.submittedAt = null;
+                        st.closedScore = null;
+                        st.graded = false;
+                        delete st.forced;
+                        updatedStudents[p] = st;
+                    }
+                });
+                const updatedClasses = { ...db.classes, [cls]: { ...classData, students: updatedStudents } };
+                onSyncUpdate(null, null, null, updatedClasses);
+                setUndoAllOpen(false);
             };
 
             const saveGrade = (pin, grades) => {
@@ -957,7 +1078,7 @@
                     app: 'verifiche-arte-bianca',
                     exportedAt: new Date().toISOString(),
                     classe: cls,
-                    dati: { published: !!classData.published, students: classData.students },
+                    dati: { published: !!classData.published, esercitazione: !!classData.esercitazione, students: classData.students },
                     quesiti: questions,
                     examTitle: examTitle
                 };
@@ -987,7 +1108,7 @@
                             Object.values(parsed.dati.students).forEach(s => { studentsNorm[String(s.pin)] = normalizzaStudente(s); });
                             const quesitiClasse = (Array.isArray(parsed.quesiti) && parsed.quesiti.length) ? parsed.quesiti : ((db.classes[parsed.classe] && db.classes[parsed.classe].questions) || []);
                             const titoloClasse = parsed.examTitle || ((db.classes[parsed.classe] && db.classes[parsed.classe].examTitle) || '');
-                            const updatedClasses = { ...db.classes, [parsed.classe]: { published: !!parsed.dati.published, students: studentsNorm, questions: quesitiClasse, examTitle: titoloClasse } };
+                            const updatedClasses = { ...db.classes, [parsed.classe]: { published: !!parsed.dati.published, esercitazione: !!parsed.dati.esercitazione, students: studentsNorm, questions: quesitiClasse, examTitle: titoloClasse } };
                             onSyncUpdate(null, null, null, updatedClasses);
                             setCls(parsed.classe);
                             alert("Backup della classe " + parsed.classe + " ripristinato" + ((Array.isArray(parsed.quesiti) && parsed.quesiti.length) ? " (insieme alla verifica abbinata)." : "."));
@@ -997,7 +1118,7 @@
                             Object.keys(parsed.classes).forEach(c => {
                                 const studentsNorm = {};
                                 Object.values(parsed.classes[c].students || {}).forEach(s => { studentsNorm[String(s.pin)] = normalizzaStudente(s); });
-                                restored[c] = { published: !!parsed.classes[c].published, students: studentsNorm, questions: (parsed.classes[c].questions || (Array.isArray(parsed.questions) ? parsed.questions : [])), examTitle: (parsed.classes[c].examTitle || '') };
+                                restored[c] = { published: !!parsed.classes[c].published, esercitazione: !!parsed.classes[c].esercitazione, students: studentsNorm, questions: (parsed.classes[c].questions || (Array.isArray(parsed.questions) ? parsed.questions : [])), examTitle: (parsed.classes[c].examTitle || '') };
                             });
                             onSyncUpdate(null, null, null, restored);
                             const primo = Object.keys(restored)[0];
@@ -1034,6 +1155,8 @@
 
             const gradingStudent = grading ? classData?.students[grading] : null;
             const counts = students.reduce((acc, s) => { acc[s.status] = (acc[s.status]||0)+1; return acc; }, {});
+            const playingCount = counts['playing'] || 0;
+            const forcedCount = students.filter(s => s.forced).length;
 
             return (
                 <div className="flex-grow flex flex-col min-h-screen no-print">
@@ -1054,6 +1177,16 @@
                                         </select>
                                         <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"><Icon name="chevron" size={16}/></span>
                                     </div>
+                                )}
+                                {classData && (
+                                    <button onClick={toggleEsercitazione} title="Attiva/disattiva la modalità esercitazione per questa classe"
+                                        className={`rounded-xl px-3 py-2.5 font-bold flex items-center gap-2 text-sm transition-colors ${esercitazione ? 'bg-[#5c8b73] text-white hover:brightness-95' : 'bg-white/10 text-white hover:bg-white/20'}`}>
+                                        <Icon name={esercitazione ? 'unlock' : 'lock'} size={16}/>
+                                        <span className="flex flex-col leading-none text-left">
+                                            <span className="text-[10px] uppercase tracking-widest opacity-70">Modalità</span>
+                                            <span>{esercitazione ? 'Esercitazione' : 'Verifica'}</span>
+                                        </span>
+                                    </button>
                                 )}
                                 <button onClick={onExit} className="bg-white/10 hover:bg-white/20 rounded-xl px-3 py-2.5 font-bold flex items-center gap-1.5 text-sm"><Icon name="logout" size={16}/> Esci</button>
                             </div>
@@ -1080,14 +1213,17 @@
 
                         {classesList.length > 0 && (
                             <div className="fade-in">
-                                <div className="flex flex-wrap gap-2 mb-4">
-                                    <button onClick={() => setPubOpen(true)} className="bg-[#5c8b73] text-white font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:brightness-95 scale-hover"><Icon name="eye" size={16}/> Pubblica voti</button>
-                                    <button onClick={exportPDF} className="bg-[#57534a] text-white font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-[#454138] scale-hover"><Icon name="print" size={16}/> Esporta PDF</button>
-                                    <button onClick={exportArchive} className="bg-[#57534a] text-white font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-[#454138] scale-hover"><Icon name="archive" size={16}/> Esporta Archivio HTML</button>
-                                    <button onClick={exportBackup} className="bg-white border-2 border-[#57534a] text-[#57534a] font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-gray-50 scale-hover"><Icon name="download" size={16}/> Scarica Backup</button>
+                                {esercitazione && <div className="mb-3 bg-[#5c8b73]/10 text-[#3f6a52] text-sm font-semibold rounded-xl px-4 py-2.5 flex items-center gap-2"><Icon name="refresh" size={16}/> Modalità <b>Esercitazione</b> attiva per la classe {cls}: nessun blocco, voto immediato alla consegna e ritentativi liberi.</div>}
+                                <div className="flex flex-wrap md:flex-nowrap items-center gap-1.5 mb-4">
+                                    <button onClick={() => setPubOpen(true)} className="bg-[#5c8b73] text-white font-bold rounded-xl px-3 py-2.5 text-sm flex items-center gap-1.5 hover:brightness-95 scale-hover whitespace-nowrap"><Icon name="eye" size={16}/> Pubblica voti</button>
+                                    <button onClick={() => setForceAllOpen(true)} disabled={playingCount === 0} className="bg-[#d99a4e] text-white font-bold rounded-xl px-3 py-2.5 text-sm flex items-center gap-1.5 hover:brightness-95 scale-hover disabled:opacity-30 whitespace-nowrap"><Icon name="send" size={16}/> Consegna classe{playingCount > 0 ? ` (${playingCount})` : ''}</button>
+                                    {forcedCount > 0 && <button onClick={() => setUndoAllOpen(true)} title={`Annulla consegna classe (${forcedCount}) — rimette gli alunni in corso con le risposte intatte`} className="bg-[#b9a6d9] text-[#2f2740] font-bold rounded-xl px-3 py-2.5 text-sm flex items-center gap-1.5 hover:brightness-95 scale-hover whitespace-nowrap"><Icon name="refresh" size={16}/> Annulla</button>}
+                                    <button onClick={exportPDF} className="bg-[#57534a] text-white font-bold rounded-xl px-3 py-2.5 text-sm flex items-center gap-1.5 hover:bg-[#454138] scale-hover whitespace-nowrap"><Icon name="print" size={16}/> Esporta PDF</button>
+                                    <button onClick={exportArchive} className="bg-[#57534a] text-white font-bold rounded-xl px-3 py-2.5 text-sm flex items-center gap-1.5 hover:bg-[#454138] scale-hover whitespace-nowrap"><Icon name="archive" size={16}/> Esporta HTML</button>
+                                    <button onClick={exportBackup} title="Scarica il backup di questa classe" className="bg-white border-2 border-[#57534a] text-[#57534a] font-bold rounded-xl px-3 py-2.5 text-sm flex items-center gap-1.5 hover:bg-gray-50 scale-hover whitespace-nowrap"><Icon name="download" size={16}/> Backup</button>
                                     <input type="file" accept=".json" ref={backupInputRef} onChange={handleRestoreBackup} className="hidden" />
-                                    <button onClick={() => backupInputRef.current.click()} className="bg-white border-2 border-[#57534a] text-[#57534a] font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-gray-50 scale-hover"><Icon name="refresh" size={16}/> Ripristina Backup</button>
-                                    <button onClick={() => setResetOpen(true)} className="bg-white border-2 border-[#b4472f] text-[#b4472f] font-bold rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 hover:bg-[#b4472f]/5 scale-hover ml-auto"><Icon name="trash" size={16}/> Reset Classe</button>
+                                    <button onClick={() => backupInputRef.current.click()} title="Ripristina Backup" className="bg-white border-2 border-[#57534a] text-[#57534a] font-bold rounded-xl px-3 py-2.5 text-sm flex items-center gap-1.5 hover:bg-gray-50 scale-hover whitespace-nowrap"><Icon name="refresh" size={16}/> Ripristina</button>
+                                    <button onClick={() => setResetOpen(true)} title="Reset Classe" className="bg-white border-2 border-[#b4472f] text-[#b4472f] font-bold rounded-xl px-3 py-2.5 text-sm flex items-center gap-1.5 hover:bg-[#b4472f]/5 scale-hover ml-auto whitespace-nowrap"><Icon name="trash" size={16}/> Reset</button>
                                 </div>
 
                                 <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4">
@@ -1145,7 +1281,9 @@
                                                             <td className="px-4 py-3">
                                                                 <div className="flex justify-end gap-1.5 flex-wrap">
                                                                     {locked && <button onClick={() => sblocca(s.pin)} className="bg-[#aec8ce]/30 text-[#57534a] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-[#aec8ce]/60"><Icon name="unlock" size={14}/> Sblocca</button>}
+                                                                    {playing && <button onClick={() => consegnaForzata(s.pin)} title="Consegna forzata di questo studente" className="bg-[#d99a4e]/20 text-[#8a5a1c] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-[#d99a4e]/40"><Icon name="send" size={14}/> Consegna</button>}
                                                                     {canView && <button onClick={() => setViewPin(s.pin)} className="bg-gray-100 text-[#57534a] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-gray-200"><Icon name="eye" size={14}/> Sfoglia</button>}
+                                                                    {submitted && <button onClick={() => riprendi(s.pin)} title="Rimetti in corso l'alunno con le risposte intatte (annulla la consegna)" className="bg-[#b9a6d9]/25 text-[#4a3d63] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-[#b9a6d9]/50"><Icon name="refresh" size={14}/> Riprendi</button>}
                                                                     {submitted && <button onClick={() => requestGrade(s)} className={`rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 ${s.status === 'published' ? 'bg-[#5c8b73]/15 text-[#3f6a52] hover:bg-[#5c8b73]/30' : 'bg-[#ebc871]/30 text-[#7a5c14] hover:bg-[#ebc871]/60'}`}><Icon name={s.status === 'published' ? 'unlock' : 'edit'} size={14}/> {s.status === 'published' ? 'Riapri' : (s.graded ? 'Modifica' : 'Valuta')}</button>}
                                                                 </div>
                                                             </td>
@@ -1181,6 +1319,34 @@
                                 <div className="grid grid-cols-2 gap-3 mt-5">
                                     <button onClick={() => setReopenPin(null)} className="py-3 rounded-xl font-bold border-2 border-[#57534a] text-[#57534a] hover:bg-gray-50">Annulla</button>
                                     <button onClick={doReopen} className="py-3 rounded-xl font-bold bg-[#57534a] text-white hover:bg-[#454138]">Riapri</button>
+                                </div>
+                            </div>
+                        </Modal>
+                    )}
+
+                    {forceAllOpen && (
+                        <Modal onClose={() => setForceAllOpen(false)}>
+                            <div className="text-center">
+                                <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-[#d99a4e]/20 text-[#8a5a1c] mb-3"><Icon name="send" size={26}/></div>
+                                <h3 className="text-xl font-extrabold text-[#57534a]">Consegna forzata per tutta la classe {cls}</h3>
+                                <p className="text-sm text-[#827f75] mt-2 mb-5">Verranno chiusi <b>{playingCount}</b> studenti attualmente in corso. {esercitazione ? 'Essendo in esercitazione, vedranno subito voto e correzione.' : 'La prova risulterà consegnata; potrai poi valutarla e pubblicarla come di consueto.'}</p>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button onClick={() => setForceAllOpen(false)} className="py-3 rounded-xl font-bold border-2 border-[#57534a] text-[#57534a] hover:bg-gray-50">Annulla</button>
+                                    <button onClick={consegnaForzataClasse} className="py-3 rounded-xl font-bold bg-[#d99a4e] text-white hover:brightness-95">Consegna tutti</button>
+                                </div>
+                            </div>
+                        </Modal>
+                    )}
+
+                    {undoAllOpen && (
+                        <Modal onClose={() => setUndoAllOpen(false)}>
+                            <div className="text-center">
+                                <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-[#b9a6d9]/30 text-[#4a3d63] mb-3"><Icon name="refresh" size={26}/></div>
+                                <h3 className="text-xl font-extrabold text-[#57534a]">Annullare la consegna forzata della classe {cls}</h3>
+                                <p className="text-sm text-[#827f75] mt-2 mb-5">Verranno rimessi in corso <b>{forcedCount}</b> studenti chiusi con la consegna forzata. Le loro <b>risposte restano intatte</b>: ritroveranno esattamente il compito e potranno continuare.</p>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button onClick={() => setUndoAllOpen(false)} className="py-3 rounded-xl font-bold border-2 border-[#57534a] text-[#57534a] hover:bg-gray-50">Annulla</button>
+                                    <button onClick={annullaConsegnaClasse} className="py-3 rounded-xl font-bold bg-[#b9a6d9] text-[#2f2740] hover:brightness-95">Rimetti in corso</button>
                                 </div>
                             </div>
                         </Modal>
@@ -1434,7 +1600,7 @@
                                     var stl="bg-gray-50 text-gray-400 border-transparent";
                                     if(isCor) stl="bg-[#5c8b73] text-white border-[#5c8b73]";
                                     else if(isSel) stl="bg-[#b4472f] text-white border-[#b4472f]";
-                                    return <div key={idx} className={"p-3 rounded-xl text-sm font-medium border flex items-center justify-between "+stl}><span>{opt}</span><span className="text-xs font-extrabold">{isCor?"\u2713":(isSel?"\u2717":"")}</span></div>;
+                                    return <div key={idx} className={"p-3 rounded-xl text-sm font-medium border flex items-center justify-between "+stl}><span>{opt}</span><span className="text-xs font-extrabold">{isCor?"✓":(isSel?"✗":"")}</span></div>;
                                 })}
                             </div>
                         );
@@ -1444,7 +1610,7 @@
                             <div className="space-y-2">
                                 {(q.pairs||[]).map(function(p,k){
                                     var ch=sel&&sel[p.item]; var ok=ch===p.match;
-                                    return <div key={k} className={"p-3 rounded-xl border text-sm "+(ch?(ok?"border-[#5c8b73] bg-[#5c8b73]/5":"border-[#b4472f] bg-[#b4472f]/5"):"border-gray-300")}><div className="font-semibold text-[#262420]">{p.item}</div><div className={ok?"text-[#3f6a52]":"text-[#b4472f]"}>{ch||"\u2014"} {ch?(ok?"\u2713":"\u2717"):""}</div>{!ok?<div className="text-[#57534a] text-xs mt-1">Corretto: {p.match}</div>:null}</div>;
+                                    return <div key={k} className={"p-3 rounded-xl border text-sm "+(ch?(ok?"border-[#5c8b73] bg-[#5c8b73]/5":"border-[#b4472f] bg-[#b4472f]/5"):"border-gray-300")}><div className="font-semibold text-[#262420]">{p.item}</div><div className={ok?"text-[#3f6a52]":"text-[#b4472f]"}>{ch||"—"} {ch?(ok?"✓":"✗"):""}</div>{!ok?<div className="text-[#57534a] text-xs mt-1">Corretto: {p.match}</div>:null}</div>;
                                 })}
                             </div>
                         );
@@ -1453,7 +1619,7 @@
                     var g=s.openGrades&&s.openGrades[q.id];
                     return (
                         <div>
-                            <div className="bg-gray-50 rounded-xl p-4 text-sm whitespace-pre-wrap leading-relaxed text-[#262420]">{txt||"\u2014"}</div>
+                            <div className="bg-gray-50 rounded-xl p-4 text-sm whitespace-pre-wrap leading-relaxed text-[#262420]">{txt||"—"}</div>
                             {g&&g.comment?<div className="bg-[#aec8ce]/20 rounded-xl p-4 text-sm mt-3"><div className="text-xs font-bold text-[#57534a] uppercase mb-1">Commento del docente</div><div className="text-[#262420] leading-relaxed whitespace-pre-wrap">{g.comment}</div></div>:null}
                         </div>
                     );
@@ -1516,7 +1682,7 @@
                                                     <td className="px-4 py-3 font-mono font-bold text-[#57534a]">{s.pin}</td>
                                                     <td className="px-4 py-3 font-semibold whitespace-nowrap">{s.lastName} {s.firstName}</td>
                                                     <td className="px-4 py-3 text-center font-semibold text-[#57534a]">{fmtN(bd.closedScore)+"/"+fmtN(bd.closedMax)}</td>
-                                                    <td className="px-4 py-3 text-center font-semibold">{hasOpen?(fmtN(bd.openScore)+"/"+fmtN(bd.openMax)):"\u2014"}</td>
+                                                    <td className="px-4 py-3 text-center font-semibold">{hasOpen?(fmtN(bd.openScore)+"/"+fmtN(bd.openMax)):"—"}</td>
                                                     <td className="px-4 py-3 text-center font-extrabold text-[#57534a]">{fmtN(bd.total)+"/"+fmtN(bd.totalMax)}</td>
                                                     <td className={"px-4 py-3 text-center font-extrabold "+(pct>=SOGLIA?"text-[#5c8b73]":"text-[#b4472f]")}>{pct+"%"}</td>
                                                     <td className="px-4 py-3 text-center font-bold">{voto}</td>
@@ -1537,7 +1703,7 @@
             return [
                 '<!DOCTYPE html>',
                 '<html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">',
-                '<title>Archivio verifica ' + cls + ' \u2014 Arte Bianca di Neive</title>',
+                '<title>Archivio verifica ' + cls + ' — Arte Bianca di Neive</title>',
                 '<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin><\/script>',
                 '<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin><\/script>',
                 '<script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>',
@@ -1606,6 +1772,7 @@
                 const found = findStudent(db.classes, pin);
                 if (!found) { callback({ ok: false, msg: "PIN non censito a sistema." }); return; }
                 const { cls, student } = found;
+                const esercitazione = !!(db.classes[cls] && db.classes[cls].esercitazione);
 
                 if (student.status === 'idle') {
                     const clsQuestions = (db.classes[cls] && db.classes[cls].questions) || [];
@@ -1628,8 +1795,9 @@
                     setSession({ pin, cls }); setView('student');
                     callback({ ok: true });
                 } else if (student.status === 'playing') {
-                    // Se il docente ha appena sbloccato, concedo UN rientro per riprendere da dove era.
-                    if (student.resumeAllowed) {
+                    // ESERCITAZIONE: nessun blocco anti-furbetto, rientro sempre consentito.
+                    // Se il docente ha appena sbloccato (resumeAllowed), concedo comunque UN rientro.
+                    if (esercitazione || student.resumeAllowed) {
                         const updated = { ...student, resumeAllowed: false };
                         sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
                         setSession({ pin, cls }); setView('student');
@@ -1667,5 +1835,35 @@
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
+    <!--
+      MODIFICHE APPLICATE (prof. Becattini · dashboard verifiche):
+      1) ReviewExam: badge "ottenuti / massimo" per ogni domanda chiusa quando reveal=true
+         (verde=pieno, rosso=zero, grigio=parziale). Le aperte mantengono il badge X/Y pt esistente.
+      2) Modalità ESERCITAZIONE per classe (flag classData.esercitazione, default false):
+         - AdminApp: toggle Verifica/Esercitazione nell'header + default flag su handleUploadClasse
+           e nel ripristino backup (single/full) + campo nel backup esportato.
+         - StudentApp: const esercitazione; consegna() -> status 'published' se esercitazione;
+           funzione riprova() (azzera studente e rigenera optionOrder/matchOrder/questionOrder);
+           pulsante "Riprova · Nuova esercitazione" nella vista 'published'.
+         - App.handleStudentLogin: ramo 'playing' non blocca mai se esercitazione (rientro libero).
+      3) CONSEGNA FORZATA (AdminApp):
+         - consegnaForzata(pin): chiude un singolo studente 'playing' (published in esercitazione,
+           submitted in verifica) con closedScore; pulsante "Consegna" per riga sugli studenti in corso.
+         - consegnaForzataClasse(): chiude tutti gli studenti 'playing'; pulsante "Consegna classe"
+           + modale di conferma (forceAllOpen).
+      4) BARRA AZIONI SU UNA RIGA + ETICHETTE CORTE (AdminApp):
+         - contenitore flex con md:flex-nowrap, gap-1.5 e px-3 (whitespace-nowrap sui bottoni) cosi
+           su desktop/smartboard i pulsanti stanno in fila; flex-wrap resta come fallback su schermi stretti.
+         - etichette accorciate: "Consegna classe (N)", "Esporta HTML", "Backup", "Ripristina", "Reset".
+      5) ANNULLA / RIPRENDI CONSEGNA (AdminApp):
+         - consegnaForzata()/consegnaForzataClasse() marcano gli studenti chiusi con forced:true;
+           consegna() volontaria e riprova() impostano forced:false.
+         - riprendi(pin): rimette status:'playing', resumeAllowed:true, submittedAt:null, closedScore:null,
+           graded:false e rimuove forced, SENZA toccare answers/openAnswer/optionOrder/matchOrder/questionOrder.
+           Pulsante "Riprendi" per riga sugli studenti 'submitted'/'published' (distinto da "Riapri").
+         - annullaConsegnaClasse(): applica riprendi a tutti gli studenti con forced:true; pulsante
+           "Annulla consegna classe (N)" (visibile solo se forcedCount>0) + modale di conferma (undoAllOpen).
+      Nessuna modifica a Supabase/schema/costanti; ogni scrittura passa da onSyncUpdate/syncUpdateCloud.
+    -->
 </body>
 </html>
