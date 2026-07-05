@@ -155,7 +155,7 @@
                 const correct = sel.filter(i => (q.correctIndices || []).includes(i)).length;
                 const wrong = sel.length - correct;
                 if (wrong === 0 && correct === 2) return q.points;   // entrambe giuste
-                if (wrong === 0 && correct === 1) return 0.5;        // una sola giusta
+                if (wrong === 0 && correct === 1) return 0.4;        // una sola giusta (parziale multipla)
                 return 0;
             }
             if (q.type === 'matching') {
