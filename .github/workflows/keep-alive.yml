@@ -1,14 +1,26 @@
 name: Supabase Keep-Alive
 
-# Gira da solo ogni 2 giorni (margine ampio sotto i 7 giorni di Supabase)
-# e puoi avviarlo a mano dal pulsante "Run workflow".
+# PERCHE' PRIMA NON FUNZIONAVA
+# Supabase NON controlla "almeno un contatto ogni 7 giorni".
+# La sua regola vera e': il database deve ricevere QUALCHE richiesta
+# OGNI GIORNO nell'arco dell'ultima settimana.
+# Il campanellino vecchio suonava una volta sola ogni 2 giorni: troppo poco.
+#
+# ADESSO: suona ogni 3 ore (8 volte al giorno) e a ogni giro fa
+# 4 richieste vere al database (1 scrittura + 3 letture).
+# Anche se GitHub salta o ritarda qualche giro, ogni giorno il database
+# riceve comunque decine di richieste.
 on:
   schedule:
-    - cron: '0 6 */2 * *'
+    - cron: '13 */3 * * *'
   workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
 
 jobs:
   keepalive:
@@ -17,29 +29,62 @@ jobs:
       - name: Scarica il repository
         uses: actions/checkout@v4
 
-      - name: Scrittura reale sul database (tiene sveglio Supabase)
+      - name: Sveglia il database (scrittura + letture vere)
+        env:
+          SB_URL: https://zwuutlrafdmfqexbnohc.supabase.co
+          SB_KEY: sb_publishable_6oCmDuDh_8ibf-p4ZAcfZg_muXXuO8N
         run: |
-          CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
-            "https://zwuutlrafdmfqexbnohc.supabase.co/rest/v1/keepalive" \
-            -H "apikey: sb_publishable_6oCmDuDh_8ibf-p4ZAcfZg_muXXuO8N" \
+          set -u
+          fallite=0
+
+          chiama() {
+            descrizione="$1"
+            shift
+            codice=$(curl -s -o /dev/null -w "%{http_code}" \
+              --retry 3 --retry-delay 5 --retry-all-errors --max-time 30 \
+              -H "apikey: $SB_KEY" "$@")
+            echo "  $descrizione  ->  HTTP $codice"
+            case "$codice" in
+              2*) ;;
+              *) fallite=$((fallite + 1)) ;;
+            esac
+          }
+
+          echo "Giro di richieste al database Verifiche Arte Bianca:"
+
+          chiama "scrittura sul registro dei ping" \
+            -X POST "$SB_URL/rest/v1/keepalive" \
             -H "Content-Type: application/json" \
             -H "Prefer: return=minimal" \
-            -d "{\"ts\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}")
-          echo "Risposta del database: HTTP $CODE"
-          case "$CODE" in
-            2*) echo "OK: ping registrato, timer di pausa azzerato." ;;
-            *) echo "ERRORE HTTP $CODE"; exit 1 ;;
-          esac
+            -d "{\"ts\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
 
-      - name: Marcatore anti-disattivazione (tiene vivo GitHub Actions)
+          chiama "lettura dell'ultimo ping" \
+            "$SB_URL/rest/v1/keepalive?select=ts&order=ts.desc&limit=1"
+
+          chiama "lettura della tabella app_state" \
+            "$SB_URL/rest/v1/app_state?select=*&limit=1"
+
+          chiama "conteggio dei ping" \
+            -I -H "Prefer: count=exact" \
+            "$SB_URL/rest/v1/keepalive?select=ts&limit=1"
+
+          if [ "$fallite" -gt 0 ]; then
+            echo "ATTENZIONE: $fallite richieste su 4 non sono andate a buon fine."
+            exit 1
+          fi
+          echo "OK: il database ha risposto a tutte e 4 le richieste."
+
+      - name: Marcatore anti-disattivazione (una volta al giorno)
         run: |
           mkdir -p .github
-          date -u +"%Y-%m-%d %H:%M:%S UTC" > .github/last-keepalive.txt
-
-      - name: Salva il marcatore
-        run: |
+          date -u +"%Y-%m-%d" > .github/last-keepalive.txt
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .github/last-keepalive.txt
-          git commit -m "keep-alive: $(date -u +%F)" || exit 0
+          if git diff --cached --quiet; then
+            echo "Marcatore gia' aggiornato oggi: niente da salvare."
+            exit 0
+          fi
+          git commit -m "keep-alive: $(date -u +%F)"
+          git pull --rebase --autostash
           git push
