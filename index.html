@@ -1290,7 +1290,9 @@
 
             const gradingStudent = grading ? classData?.students[grading] : null;
             const counts = students.reduce((acc, s) => { acc[s.status] = (acc[s.status]||0)+1; return acc; }, {});
-            const playingCount = counts['playing'] || 0;
+            const playingCount = counts['playing'] || 0;                                   // prove aperte, non ancora consegnate
+            const scollegatiCount = students.filter(s => s.status === 'playing' && scollegati[String(s.pin)]).length;
+            const alLavoroCount = playingCount - scollegatiCount;                          // di queste, quanti sono collegati adesso
             const forcedCount = students.filter(s => s.forced).length;
 
             return (
@@ -1364,8 +1366,9 @@
                                 <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4">
                                     {[['idle','Non iniziati'],['playing','In corso'],['locked','Bloccati'],['submitted','Consegnati'],['published','Pubblicati']].map(([k,label]) => (
                                         <div key={k} className="bg-white rounded-xl shadow-card border border-gray-100 px-3 py-2.5 text-center">
-                                            <div className="text-2xl font-extrabold text-[#57534a]">{counts[k]||0}</div>
+                                            <div className="text-2xl font-extrabold text-[#57534a]">{k === 'playing' ? alLavoroCount : (counts[k]||0)}</div>
                                             <div className="text-[11px] font-semibold text-[#827f75] uppercase tracking-wide">{label}</div>
+                                            {k === 'playing' && scollegatiCount > 0 && <div className="text-[11px] font-semibold text-gray-400">+ {scollegatiCount} non collegat{scollegatiCount === 1 ? 'o' : 'i'}</div>}
                                         </div>
                                     ))}
                                 </div>
@@ -1405,7 +1408,7 @@
                                                             <td className="px-4 py-3">
                                                                 <div className="flex items-center gap-2">
                                                                     <StatusBadge status={playing && scollegati[String(s.pin)] ? 'offline' : s.status}/>
-                                                                    {playing && <span className="text-xs font-bold text-[#57534a]">{answeredCount}/{questions.length}</span>}
+                                                                    {playing && !scollegati[String(s.pin)] && <span title="Risposte date finora" className="text-xs font-bold text-[#57534a]">{answeredCount}/{questions.length}</span>}
                                                                 </div>
                                                             </td>
                                                             <td className="px-4 py-3 text-center font-semibold text-[#57534a]">{submitted ? `${fmtN(bd.closedScore)}/${fmtN(bd.closedMax)}` : '—'}</td>
@@ -1465,7 +1468,7 @@
                             <div className="text-center">
                                 <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-[#d99a4e]/20 text-[#8a5a1c] mb-3"><Icon name="send" size={26}/></div>
                                 <h3 className="text-xl font-extrabold text-[#57534a]">Consegna forzata per tutta la classe {cls}</h3>
-                                <p className="text-sm text-[#827f75] mt-2 mb-5">Verranno chiusi <b>{playingCount}</b> studenti attualmente in corso. {esercitazione ? 'Essendo in esercitazione, vedranno subito voto e correzione.' : 'La prova risulterà consegnata; potrai poi valutarla e pubblicarla come di consueto.'}</p>
+                                <p className="text-sm text-[#827f75] mt-2 mb-5">Verranno chiuse <b>{playingCount}</b> prove ancora aperte: <b>{alLavoroCount}</b> di alunni collegati adesso e <b>{scollegatiCount}</b> di alunni non collegati, con quello che avevano scritto. {esercitazione ? 'Essendo in esercitazione, vedranno subito voto e correzione.' : 'La prova risulterà consegnata; potrai poi valutarla e pubblicarla come di consueto.'}</p>
                                 <div className="grid grid-cols-2 gap-3">
                                     <button onClick={() => setForceAllOpen(false)} className="py-3 rounded-xl font-bold border-2 border-[#57534a] text-[#57534a] hover:bg-gray-50">Annulla</button>
                                     <button onClick={consegnaForzataClasse} className="py-3 rounded-xl font-bold bg-[#d99a4e] text-white hover:brightness-95">Consegna tutti</button>
