@@ -160,22 +160,43 @@
         };
         const chiaveOp = (op) => JSON.stringify(op.p);
 
-        /* PALLINO ROSSO. Il segnale «sono uscito / sono rientrato» NON passa da app_state (dove stanno le risposte):
-           va in uno scomparto suo (ver_segnali) attraverso la porta ver_segnale. Parte con fetch keepalive perche'
-           un telefono congela la pagina subito dopo averla mandata dietro, e una richiesta normale morirebbe li'. */
-        let ultimoSeq = 0;
-        const segnalaFuori = (pin, fuori, chiusa) => {
-            try {
-                ultimoSeq = Math.max(Date.now(), ultimoSeq + 1);   // sempre crescente, anche per due segnali nello stesso millisecondo
-                fetch(SUPABASE_URL + '/rest/v1/rpc/ver_segnale', {
-                    method: 'POST', keepalive: true,
-                    headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
-                    body: JSON.stringify({ p_pin: String(pin), p_fuori: !!fuori, p_seq: ultimoSeq, p_chiusa: !!chiusa })   // p_seq: se due segnali arrivano invertiti, vince il piu' recente
-                }).catch(() => {});
-            } catch (e) { }
+        /* LE PORTE DELL'ALUNNO (19/09/2026). L'alunno non legge e non scrive piu' la scheda di tutti (app_state):
+           parla col cloud solo attraverso funzioni che gli danno la SUA scheda e le domande SENZA le risposte giuste
+           (ver_entra, ver_mio, ver_battito, ver_rispondi, ver_consegna, ver_riprova, ver_esci). Si chiamano sempre
+           con la chiave pubblica, mai con il riconoscimento del docente, e con keepalive quando la pagina sta morendo
+           (un telefono congela la pagina subito dopo averla mandata dietro: una richiesta normale morirebbe li'). */
+        const porta = async (nome, corpo, subito) => {
+            const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/' + nome, {
+                method: 'POST', keepalive: !!subito,
+                headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
+                body: JSON.stringify(corpo || {})
+            });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
         };
+        // Come sopra, ma con pazienza: se la rete ha un buco riprova (un buco di rete non e' un PIN sbagliato).
+        const portaPaziente = async (nome, corpo, tentativi = 3) => {
+            let ultimoErrore = null;
+            for (let i = 0; i < tentativi; i++) {
+                try { return await porta(nome, corpo); } catch (e) { ultimoErrore = e; await new Promise(ok => setTimeout(ok, 1200 * (i + 1))); }
+            }
+            throw ultimoErrore;
+        };
+        // Il codice di questo dispositivo: serve a riconoscere «lo stesso telefono di prima» (rientro entro mezz'ora).
+        let dispositivoInMemoria = null;
+        const codiceDispositivo = () => {
+            try {
+                let d = localStorage.getItem('ver_dispositivo');
+                if (!d) { d = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('d' + Date.now() + Math.random().toString(16).slice(2)); localStorage.setItem('ver_dispositivo', d); }
+                return d;
+            } catch (e) {
+                if (!dispositivoInMemoria) dispositivoInMemoria = 'm' + Date.now() + Math.random().toString(16).slice(2);
+                return dispositivoInMemoria;
+            }
+        };
+        let ultimoSeq = 0;
+        const prossimoSeq = () => { ultimoSeq = Math.max(Date.now(), ultimoSeq + 1); return ultimoSeq; };   // sempre crescente
 
-        const ADMIN_PASSWORD = "16031948";      
         const SESSION_KEY = "ab_exam_session_v1"; 
         const SOGLIA_SUFFICIENZA = 60;            
 
@@ -531,7 +552,7 @@
             const sel = (answer && answer.selection && typeof answer.selection === 'object') ? answer.selection : {};
             const itemsOrder = (order && order.items && order.items.length === pairs.length) ? order.items : pairs.map((_, i) => i);
             const optsOrder = (order && order.opts && order.opts.length === pairs.length) ? order.opts : pairs.map((_, i) => i);
-            const matchOptions = optsOrder.map(i => pairs[i].match);
+            const matchOptions = Array.isArray(q.opzioni) ? optsOrder.map(i => q.opzioni[i]) : optsOrder.map(i => pairs[i].match);
             return (
                 <div className="space-y-3">
                     {itemsOrder.map((i) => {
@@ -586,18 +607,45 @@
             const [err, setErr] = useState("");
             const [adminPwOpen, setAdminPwOpen] = useState(false);
             const [pw, setPw] = useState("");
-            const [pwErr, setPwErr] = useState(false);
+            const [pwErr, setPwErr] = useState("");
+            const [mail, setMail] = useState(() => { try { return localStorage.getItem('cf_mail_docente') || ''; } catch (e) { return ''; } });
+            const [attesa, setAttesa] = useState(false);
+            const [entrando, setEntrando] = useState(false);
 
             const submitPin = () => {
                 const clean = pin.trim().toLowerCase();
-                if (clean === "admin") { setAdminPwOpen(true); return; }
+                if (clean === "admin") { apriDocente(); return; }
                 if (!/^\d{5}$/.test(pin.trim())) { setErr("Il PIN deve essere di 5 cifre."); return; }
-                onStudent(pin.trim(), (res) => { if (!res.ok) setErr(res.msg); });
+                if (entrando) return;                       // un doppio tocco su «Entra» non deve fare due ingressi
+                setEntrando(true);
+                onStudent(pin.trim(), (res) => { setEntrando(false); if (!res.ok) setErr(res.msg); });
             };
 
-            const submitPw = () => {
-                if (pw === ADMIN_PASSWORD) { onAdmin(); }
-                else { setPwErr(true); setPw(""); }
+            // DOCENTE: si entra con l'utente del cloud (lo stesso di Cedolino Facile). La password non sta nella pagina:
+            // la controlla il cloud, e il cloud controlla anche che quell'utente sia nell'elenco dei docenti.
+            const apriDocente = async () => {
+                setPwErr(""); setAdminPwOpen(true);
+                try {
+                    const { data } = await supabase.auth.getSession();
+                    if (data && data.session) {
+                        const r = await supabase.rpc('cf_e_docente');
+                        if (r.data === true) { setAdminPwOpen(false); onAdmin(); }
+                    }
+                } catch (e) { }
+            };
+            const submitPw = async () => {
+                if (attesa) return;
+                if (!mail.trim() || !pw) { setPwErr("Scrivi email e password."); return; }
+                setAttesa(true); setPwErr("");
+                try {
+                    const { error } = await supabase.auth.signInWithPassword({ email: mail.trim(), password: pw });
+                    if (error) { setPwErr(/invalid/i.test(error.message || '') ? "Email o password errata." : "Il collegamento non risponde: riprova."); setPw(""); setAttesa(false); return; }
+                    const r = await supabase.rpc('cf_e_docente');
+                    if (r.data !== true) { await supabase.auth.signOut(); setPwErr("Questo utente non è fra i docenti autorizzati."); setPw(""); setAttesa(false); return; }
+                    try { localStorage.setItem('cf_mail_docente', mail.trim()); } catch (e) { }
+                    setAttesa(false); setPw(""); setAdminPwOpen(false);
+                    onAdmin();
+                } catch (e) { setPwErr("Il collegamento non risponde: riprova."); setAttesa(false); }
             };
 
             return (
@@ -613,24 +661,26 @@
                             className="w-full text-center text-3xl font-extrabold tracking-[0.4em] py-4 rounded-2xl border-2 border-gray-200 focus:border-[#57534a] outline-none transition-colors text-[#57534a]" />
                         {err && <div className="text-[#b4472f] text-sm font-semibold mt-3">{err}</div>}
 
-                        <button onClick={submitPin} className="w-full mt-5 py-4 rounded-2xl font-bold bg-[#57534a] text-white shadow-lg hover:bg-[#454138] transition-colors scale-hover flex items-center justify-center gap-2">
-                            Entra <Icon name="next" size={18} />
+                        <button onClick={submitPin} disabled={entrando} className="w-full mt-5 py-4 rounded-2xl font-bold bg-[#57534a] text-white shadow-lg hover:bg-[#454138] transition-colors scale-hover flex items-center justify-center gap-2 disabled:opacity-60">
+                            {entrando ? 'Un momento…' : 'Entra'} <Icon name="next" size={18} />
                         </button>
-                        <button onClick={() => setAdminPwOpen(true)} className="mt-5 text-xs font-semibold text-gray-400 hover:text-[#57534a] inline-flex items-center gap-1"><Icon name="shield" size={14} /> Accesso docente</button>
+                        <button onClick={apriDocente} className="mt-5 text-xs font-semibold text-gray-400 hover:text-[#57534a] inline-flex items-center gap-1"><Icon name="shield" size={14} /> Accesso docente</button>
                     </div>
                     <Signature />
 
                     {adminPwOpen && (
-                        <Modal onClose={() => { setAdminPwOpen(false); setPw(""); setPwErr(false); }}>
+                        <Modal onClose={() => { setAdminPwOpen(false); setPw(""); setPwErr(""); }}>
                             <div className="text-center">
                                 <h3 className="text-xl font-extrabold text-[#57534a]">Area Docente</h3>
-                                <p className="text-sm text-[#827f75] mt-1 mb-5">Inserisci la password di accesso.</p>
-                                <input type="password" value={pw} autoFocus onChange={e => { setPw(e.target.value); setPwErr(false); }} onKeyDown={e => e.key === 'Enter' && submitPw()} placeholder="Password"
+                                <p className="text-sm text-[#827f75] mt-1 mb-5">Email e password del docente.</p>
+                                <input type="email" value={mail} autoComplete="username" onChange={e => { setMail(e.target.value); setPwErr(""); }} onKeyDown={e => e.key === 'Enter' && submitPw()} placeholder="Email"
+                                    className="w-full text-center text-base font-semibold py-3 rounded-xl border-2 border-gray-200 focus:border-[#57534a] outline-none mb-3" />
+                                <input type="password" value={pw} autoFocus autoComplete="current-password" onChange={e => { setPw(e.target.value); setPwErr(""); }} onKeyDown={e => e.key === 'Enter' && submitPw()} placeholder="Password"
                                     className="w-full text-center text-lg font-semibold py-3 rounded-xl border-2 border-gray-200 focus:border-[#57534a] outline-none" />
-                                {pwErr && <div className="text-[#b4472f] text-sm font-semibold mt-3">Password errata.</div>}
+                                {pwErr && <div className="text-[#b4472f] text-sm font-semibold mt-3">{pwErr}</div>}
                                 <div className="grid grid-cols-2 gap-3 mt-5">
-                                    <button onClick={() => { setAdminPwOpen(false); setPw(""); setPwErr(false); }} className="py-3 rounded-xl font-bold border-2 border-gray-200 text-[#57534a] hover:bg-gray-50">Annulla</button>
-                                    <button onClick={submitPw} className="py-3 rounded-xl font-bold bg-[#57534a] text-white hover:bg-[#454138]">Accedi</button>
+                                    <button onClick={() => { setAdminPwOpen(false); setPw(""); setPwErr(""); }} className="py-3 rounded-xl font-bold border-2 border-gray-200 text-[#57534a] hover:bg-gray-50">Annulla</button>
+                                    <button onClick={submitPw} disabled={attesa} className="py-3 rounded-xl font-bold bg-[#57534a] text-white hover:bg-[#454138] disabled:opacity-60">{attesa ? 'Un momento…' : 'Accedi'}</button>
                                 </div>
                             </div>
                         </Modal>
@@ -736,150 +786,82 @@
             );
         };
 
-        const StudentApp = ({ pin, cls, db, onSyncUpdate }) => {
-            const student = db.classes[cls]?.students[pin];
-            const questions = (db.classes[cls] && db.classes[cls].questions) || [];
-            const examTitle = (db.classes[cls] && db.classes[cls].examTitle) || '';
-            const esercitazione = !!(db.classes[cls] && db.classes[cls].esercitazione);
+        const StudentApp = ({ vista, azioni }) => {
+            const pin = vista.student.pin;
+            const cls = vista.cls;
+            const student = vista.student;
+            const questions = vista.questions || [];
+            const examTitle = vista.examTitle || '';
+            const esercitazione = !!vista.esercitazione;
             const maxClosed = questions.filter(q => q.type === 'single').reduce((a, q) => a + q.points, 0);
             const openQuestion = questions.find(q => q.type === 'open');
             const maxOpen = openQuestion ? openQuestion.points : 0;
             const maxTotal = maxClosed + maxOpen;
             const [idx, setIdx] = useState(0);
             const [confirmOpen, setConfirmOpen] = useState(false);
+            const [consegnando, setConsegnando] = useState(false);
+            const risposte = student.answers || {};
 
-            // Lo sblocco del docente concede UN solo rientro: appena lo studente è di nuovo
-            // "in corso" (sia rientrando col PIN, sia con la pagina che si riapre da sola)
-            // il permesso viene consumato. Se esce ancora, sarà di nuovo bloccato.
-            useEffect(() => {
-                if (student && student.status === 'playing' && student.resumeAllowed) {
-                    onSyncUpdate(cls, pin, { ...student, resumeAllowed: false });
-                }
-            }, [student && student.status, student && student.resumeAllowed]);
-
-            /* PALLINO ROSSO + NIENTE COPIA (19/09/2026). Vale solo a prova IN CORSO. Non blocca e non avvisa nessuno:
-               dice soltanto alla dashboard del docente che questa pagina non e' piu' davanti agli occhi dell'alunno
-               (scheda cambiata, finestra abbassata, altra app, schermo spento, clic fuori dalla finestra). */
-            const inProva = !!(student && student.status === 'playing');
+            /* NIENTE COPIA (19/09/2026). Vale solo a prova IN CORSO: il testo delle domande non si seleziona e non si
+               copia. La presenza e il pallino rosso li manda il battito, in App. */
+            const inProva = student.status === 'playing';
             useEffect(() => {
                 if (!inProva) return;
-                let ultimo = null, quando = 0;
-                const manda = (fuori) => { if (ultimo === 'chiusa' || ultimo === fuori) return; ultimo = fuori; quando = Date.now(); segnalaFuori(pin, fuori); };
-                const stato = () => manda(document.visibilityState === 'hidden' || !document.hasFocus());
-                const via = () => manda(true);
-                // Pagina CHIUSA davvero (scheda chiusa, F5, altro indirizzo): lo dico, cosi' il docente vede «Non collegato»
-                // e non un «In corso» che non finisce mai. Se invece la pagina viene solo messa da parte, vale come uscita.
-                // Dopo il saluto la pagina tace: il browser manda ancora un «nascosta» mentre chiude, e non deve sorpassarlo.
-                const chiude = (e) => { if (e && e.persisted) { via(); return; } if (ultimo === 'chiusa') return; ultimo = 'chiusa'; segnalaFuori(pin, false, true); };
                 const noCopia = (e) => { e.preventDefault(); };
-                stato();
-                document.addEventListener('visibilitychange', stato);
-                window.addEventListener('blur', via);
-                window.addEventListener('focus', stato);
-                window.addEventListener('pageshow', stato);
-                window.addEventListener('pagehide', chiude);
-                document.addEventListener('freeze', via);
-                document.addEventListener('resume', stato);
                 document.addEventListener('copy', noCopia);
                 document.addEventListener('cut', noCopia);
                 document.addEventListener('contextmenu', noCopia);
                 document.body.classList.add('in-prova');
-                // Battito: finche' la pagina e' davanti ridico «sono qui» ogni 5 secondi (il docente mi vede collegato se
-                // ho parlato negli ultimi 20); da fuori basta ridirlo ogni 20 (li' il docente aspetta 90 secondi di silenzio,
-                // perche' il browser fa battere piano le pagine messe dietro). Si conta il TEMPO, non i giri: un timer
-                // rallentato dal browser non deve allungare il silenzio.
-                const t = setInterval(() => { if (ultimo === false || (ultimo === true && Date.now() - quando >= 19000)) ultimo = null; stato(); }, 5000);
                 return () => {
-                    clearInterval(t);
-                    document.removeEventListener('visibilitychange', stato);
-                    window.removeEventListener('blur', via);
-                    window.removeEventListener('focus', stato);
-                    window.removeEventListener('pageshow', stato);
-                    window.removeEventListener('pagehide', chiude);
-                    document.removeEventListener('freeze', via);
-                    document.removeEventListener('resume', stato);
                     document.removeEventListener('copy', noCopia);
                     document.removeEventListener('cut', noCopia);
                     document.removeEventListener('contextmenu', noCopia);
                     document.body.classList.remove('in-prova');
-                    segnalaFuori(pin, false);   // prova finita o uscita: il pallino non ha piu' senso
                 };
-            }, [inProva, pin]);
+            }, [inProva]);
 
             const answer = (qid, selection) => {
                 if (student.status !== 'playing') return;
-                const updatedStudent = { ...student };
-                updatedStudent.answers = { ...updatedStudent.answers, [qid]: { selection } };
-                onSyncUpdate(cls, pin, updatedStudent);
+                azioni.rispondi(qid, selection);
             };
 
             const toggleMulti = (qid, idx) => {
                 if (student.status !== 'playing') return;
-                const cur = (student.answers[qid] && Array.isArray(student.answers[qid].selection)) ? student.answers[qid].selection : [];
+                const cur = (risposte[qid] && Array.isArray(risposte[qid].selection)) ? risposte[qid].selection : [];
                 let next;
                 if (cur.includes(idx)) next = cur.filter(x => x !== idx);
                 else if (cur.length >= 2) next = [cur[1], idx];   // mantiene al massimo 2 selezioni
                 else next = [...cur, idx];
-                const updatedStudent = { ...student, answers: { ...student.answers, [qid]: { selection: next } } };
-                onSyncUpdate(cls, pin, updatedStudent);
+                azioni.rispondi(qid, next);
             };
 
             const pickMatch = (qid, itemText, matchText) => {
                 if (student.status !== 'playing') return;
-                const cur = (student.answers[qid] && student.answers[qid].selection && typeof student.answers[qid].selection === 'object') ? student.answers[qid].selection : {};
-                const next = { ...cur, [itemText]: matchText };
-                const updatedStudent = { ...student, answers: { ...student.answers, [qid]: { selection: next } } };
-                onSyncUpdate(cls, pin, updatedStudent);
+                const cur = (risposte[qid] && risposte[qid].selection && typeof risposte[qid].selection === 'object') ? risposte[qid].selection : {};
+                azioni.rispondi(qid, { ...cur, [itemText]: matchText });
             };
 
             const setOpen = (qid, text) => {
                 if (student.status !== 'playing') return;
-                const updatedStudent = { ...student, answers: { ...student.answers, [qid]: { selection: text } } };
-                onSyncUpdate(cls, pin, updatedStudent);
-            };
-            
-            const consegna = () => {
-                const updatedStudent = { ...student };
-                // In esercitazione la prova va subito pubblicata: lo studente vede voto e correzione.
-                updatedStudent.status = esercitazione ? 'published' : 'submitted';
-                updatedStudent.submittedAt = Date.now();
-                updatedStudent.closedScore = computeClosedScore(updatedStudent, questions);
-                updatedStudent.forced = false;   // consegna volontaria: non è forzata
-                setConfirmOpen(false);
-                onSyncUpdate(cls, pin, updatedStudent);
+                azioni.rispondi(qid, text);
             };
 
-            // ESERCITAZIONE: azzera lo studente per un nuovo tentativo (sovrascrive il precedente).
-            const riprova = () => {
-                const updatedStudent = {
-                    ...student,
-                    status: 'playing',
-                    answers: {},
-                    openAnswer: '',
-                    openScore: null,
-                    closedScore: null,
-                    openComment: '',
-                    openGrades: {},
-                    graded: false,
-                    forced: false,
-                    submittedAt: null,
-                    startedAt: Date.now(),
-                    resumeAllowed: false,
-                    optionOrder: buildOptionOrder(questions),
-                    matchOrder: buildMatchOrder(questions),
-                    questionOrder: buildQuestionOrder(questions)
-                };
+            // In esercitazione la prova va subito pubblicata (lo decide il cloud): lo studente vede voto e correzione.
+            const consegna = async () => {
+                if (consegnando) return;
+                setConsegnando(true);
+                const ok = await azioni.consegna();
+                setConsegnando(false);
+                if (ok) setConfirmOpen(false);
+                else alert("Il collegamento non risponde: la consegna non è partita. Riprova fra un momento (le tue risposte sono al sicuro).");
+            };
+
+            // ESERCITAZIONE: nuovo tentativo (sovrascrive il precedente). Risposte azzerate e ordini nuovi li fa il cloud.
+            const riprova = async () => {
                 setIdx(0);
-                onSyncUpdate(cls, pin, updatedStudent);
+                const ok = await azioni.riprova();
+                if (!ok) alert("Il collegamento non risponde: riprova fra un momento.");
             };
-
-            if (!student || questions.length === 0) {
-                return (
-                    <div className="flex-grow flex flex-col items-center justify-center p-6 text-center">
-                        <div className="text-xl font-bold text-[#57534a]">Caricamento o nessuna prova attiva...</div>
-                    </div>
-                );
-            }
 
             if (student.status === 'locked') {
                 return (
@@ -921,9 +903,17 @@
                 );
             }
 
+            if (questions.length === 0) {
+                return (
+                    <div className="flex-grow flex flex-col items-center justify-center p-6 text-center">
+                        <div className="text-xl font-bold text-[#57534a]">Caricamento o nessuna prova attiva...</div>
+                    </div>
+                );
+            }
+
             const ordered = orderedQuestions(student, questions);
             const q = ordered[idx] || ordered[0];
-            const ans = student.answers[q.id];
+            const ans = risposte[q.id];
             const answeredCount = questions.filter(cq => isAnswered(cq, student)).length;
 
             return (
@@ -977,7 +967,7 @@
                                 <p className="text-sm text-[#827f75] mb-5">{esercitazione ? 'Dopo l’invio vedrai subito il tuo esito e la correzione.' : 'Dopo l’invio non potrai più cambiare le risposte.'}</p>
                                 <div className="grid grid-cols-2 gap-3">
                                     <button onClick={() => setConfirmOpen(false)} className="py-3 rounded-xl font-bold border-2 border-[#57534a] text-[#57534a] hover:bg-gray-50">Annulla</button>
-                                    <button onClick={consegna} className="py-3 rounded-xl font-bold bg-[#5c8b73] text-white hover:brightness-95">Consegna</button>
+                                    <button onClick={consegna} disabled={consegnando} className="py-3 rounded-xl font-bold bg-[#5c8b73] text-white hover:brightness-95 disabled:opacity-60">{consegnando ? 'Invio…' : 'Consegna'}</button>
                                 </div>
                             </div>
                         </Modal>
@@ -1869,36 +1859,71 @@
         /* =====================================================================
            CORE CORE CORE DIRECTING DISPATCHER CON SYNC REALTIME CLOUD
         ===================================================================== */
+        // Chi bussa con un PIN gia' in uso: stessa schermata rossa di sempre. Ribussa da solo ogni 5 secondi.
+        const SchermoBloccato = ({ nome }) => (
+            <div className="flex-grow flex flex-col items-center justify-center p-6 bg-[#b4472f] text-white text-center fade-in min-h-screen">
+                <div className="pulse-red"><Icon name="lock" size={70} /></div>
+                <h1 className="text-3xl font-extrabold mt-6">Accesso bloccato</h1>
+                <p className="mt-3 text-white/90 max-w-xs font-medium">Hai già effettuato l'accesso in precedenza. Per continuare, devi chiedere lo sblocco al docente.</p>
+                {nome && <div className="mt-6 bg-white/15 rounded-2xl px-5 py-3 font-bold tracking-wide">{nome}</div>}
+            </div>
+        );
+
+        // La prova e' passata a un altro dispositivo (dopo lo «Sblocca» del docente): questa pagina non scrive piu'.
+        const SessioneChiusa = ({ onTorna }) => (
+            <div className="flex-grow flex flex-col items-center justify-center p-6 text-center fade-in">
+                <div className="w-20 h-20 rounded-full bg-gray-200 text-[#57534a] flex items-center justify-center"><Icon name="lock" size={40}/></div>
+                <h1 className="text-2xl font-extrabold text-[#57534a] mt-6">Sessione chiusa</h1>
+                <p className="mt-3 text-[#827f75] max-w-xs font-medium">La tua prova è aperta su un altro dispositivo. Il lavoro fatto fin qui è salvo.</p>
+                <button onClick={onTorna} className="mt-6 py-3 px-6 rounded-xl font-bold bg-[#57534a] text-white hover:bg-[#454138]">Torna all'ingresso</button>
+            </div>
+        );
+
         const App = () => {
-            const [view, setView] = useState('landing'); 
-            const [session, setSession] = useState(null);
-            const [db, setDb] = useState({ version: 1, classes: {} });
+            const [view, setView] = useState('landing');     // landing | student | bloccato | chiusa | admin
+            const [vista, setVista] = useState(null);         // ALUNNO: la sua scheda, come gliela da' il cloud
+            const [bussa, setBussa] = useState(null);         // ALUNNO respinto: { pin, nome }
+            const [db, setDb] = useState({ version: 1, classes: {} });   // DOCENTE: la scheda di tutti
             const [loading, setLoading] = useState(true);
 
-            /* Le scritture verso il cloud: una CODA di pezzetti, spediti in fila. Se la rete cade si riprova da
-               soli; se arriva un pezzetto nuovo per lo stesso percorso (la lettera dopo, nella stessa risposta)
-               sostituisce quello ancora in attesa. Nessuna scrittura va persa in silenzio, come capitava prima. */
+            /* ================= DOCENTE =================
+               Le scritture verso il cloud: una CODA di pezzetti, spediti in fila. Se la rete cade si riprova da
+               soli; se arriva un pezzetto nuovo per lo stesso percorso sostituisce quello ancora in attesa.
+               Dal 19/09/2026 la scheda di tutti la legge e la scrive SOLO il docente riconosciuto dal cloud
+               (porte ver_doc_leggi e ver_applica, che controllano cf_e_docente). */
             const classesRef = useRef({});     // l'ultima fotografia locale (cloud + cio' che ho scritto io)
             const codaRef = useRef([]);        // pezzetti da spedire
             const voloRef = useRef([]);        // pezzetti spediti, in attesa di conferma
             const fatteRef = useRef([]);       // pezzetti confermati da poco: { op, doneAt }
             const inviandoRef = useRef(false);
+            const tokenRef = useRef(null);     // il riconoscimento del docente, per l'ultimo invio a pagina che si chiude
+            const viewRef = useRef('landing');
+            useEffect(() => { viewRef.current = view; }, [view]);
+
+            useEffect(() => {
+                supabase.auth.getSession().then(({ data }) => { tokenRef.current = (data && data.session) ? data.session.access_token : null; }).catch(() => {});
+                const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => { tokenRef.current = session ? session.access_token : null; });
+                return () => { try { sub.subscription.unsubscribe(); } catch (e) { } };
+            }, []);
 
             const pullCloudState = async () => {
                 const t0 = Date.now();
-                const { data, error } = await supabase.from('app_state').select('db_data').eq('id', 1).single();
+                const { data, error } = await supabase.rpc('ver_doc_leggi');
+                if (viewRef.current !== 'admin') return;
                 if (!error && data) {
-                    let classes = (data.db_data && data.db_data.classes) || {};
+                    let classes = (data && data.classes) || {};
                     // Una lettura partita PRIMA che una mia scrittura fosse confermata puo' non contenerla ancora:
-                    // gliela rimetto sopra, altrimenti il testo appena battuto tornerebbe indietro sotto le dita.
-                    // Le scritture confermate prima che questa lettura partisse ci sono gia' dentro: le dimentico.
+                    // gliela rimetto sopra. Le scritture confermate prima che questa lettura partisse ci sono gia' dentro.
                     fatteRef.current = fatteRef.current.filter(x => x.doneAt > t0);
                     const sopra = [...fatteRef.current.map(x => x.op), ...voloRef.current, ...codaRef.current];
                     if (sopra.length) classes = applicaOps(classes, sopra);
                     classesRef.current = classes;
                     setDb({ version: 1, classes });
+                } else if (!error && data === null) {
+                    // Il cloud non mi riconosce piu' come docente (collegamento scaduto): non resto su un cruscotto muto.
+                    setView('landing');
+                    alert("Il collegamento da docente è scaduto: rientra con email e password.");
                 }
-                setLoading(false);
             };
 
             const spedisci = async () => {
@@ -1935,15 +1960,15 @@
                 spedisci();
             };
 
-            // Pagina che si chiude con qualcosa ancora da spedire (l'ultima lettera): parte comunque, con keepalive.
+            // Cruscotto che si chiude con qualcosa ancora da spedire: parte comunque, con keepalive.
             useEffect(() => {
                 const ultimoInvio = () => {
                     const resto = [...voloRef.current, ...codaRef.current];
-                    if (!resto.length) return;
+                    if (!resto.length || !tokenRef.current) return;
                     try {
                         fetch(SUPABASE_URL + '/rest/v1/rpc/ver_applica', {
                             method: 'POST', keepalive: true,
-                            headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
+                            headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + tokenRef.current },
                             body: JSON.stringify({ p_ops: resto })
                         }).catch(() => {});
                     } catch (e) { }
@@ -1952,26 +1977,15 @@
                 return () => window.removeEventListener('pagehide', ultimoInvio);
             }, []);
 
+            // La scheda di tutti si rilegge ogni 3 secondi SOLO dal cruscotto del docente.
             useEffect(() => {
+                if (view !== 'admin') return;
                 pullCloudState();
-                const intervalId = setInterval(() => {
-                    pullCloudState();
-                }, 3000);
+                const intervalId = setInterval(pullCloudState, 3000);
                 return () => clearInterval(intervalId);
-            }, []);
+            }, [view]);
 
-            useEffect(() => {
-                try {
-                    const raw = sessionStorage.getItem(SESSION_KEY);
-                    if (raw) {
-                        const { pin, cls } = JSON.parse(raw);
-                        setSession({ pin, cls });
-                        setView('student');
-                    }
-                } catch (e) { }
-            }, []);
-
-            // Stessa firma di prima (la usano tutti i punti dell'app), ma al cloud va SOLO la differenza.
+            // Stessa firma di prima (la usano tutti i punti del cruscotto), ma al cloud va SOLO la differenza.
             const syncUpdateCloud = async (cls, pin, updatedStudentData, fullClasses = null) => {
                 const base = classesRef.current || {};
                 let next;
@@ -1991,56 +2005,226 @@
                 accoda([{ p: ['classes'], v: {} }]);
             };
 
-            const handleStudentLogin = (pin, callback) => {
-                const found = findStudent(db.classes, pin);
-                if (!found) { callback({ ok: false, msg: "PIN non censito a sistema." }); return; }
-                const { cls, student } = found;
-                const esercitazione = !!(db.classes[cls] && db.classes[cls].esercitazione);
+            /* ================= ALUNNO =================
+               Regole di PIN, presenza e blocco: le stesse di Cedolino Facile. Un orologio solo: collegato = battito
+               negli ultimi 20 secondi, e si batte ogni 5. Le decide il cloud (ver_entra), non questa pagina. */
+            const sessRef = useRef(null);          // { pin, sess }: il gettone che il cloud da' all'ingresso
+            const vistaRef = useRef(null);
+            const pendRef = useRef({});            // risposte da spedire: { idDomanda: selezione }
+            const inVoloRef = useRef({});          // risposte spedite, in attesa di conferma
+            const inviandoRispRef = useRef(false);
+            const rifiutiRef = useRef(0);
+            const battitoVoloRef = useRef(0);
+            const salutatoRef = useRef(false);     // la pagina ha gia' detto «mi chiudo»: dopo, tace
 
-                if (student.status === 'idle') {
-                    const clsQuestions = (db.classes[cls] && db.classes[cls].questions) || [];
-                    const updated = { 
-                        ...student, 
-                        status: 'playing', 
-                        startedAt: student.startedAt || Date.now(), 
-                        optionOrder: (student.optionOrder && Object.keys(student.optionOrder).length > 0) ? student.optionOrder : buildOptionOrder(clsQuestions),
-                        matchOrder: (student.matchOrder && Object.keys(student.matchOrder).length > 0) ? student.matchOrder : buildMatchOrder(clsQuestions),
-                        questionOrder: (Array.isArray(student.questionOrder) && student.questionOrder.length) ? student.questionOrder : buildQuestionOrder(clsQuestions),
-                        openGrades: student.openGrades || {}
-                    };
-                    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
-                    setSession({ pin, cls }); setView('student');
-                    syncUpdateCloud(cls, pin, updated);
-                    callback({ ok: true });
-                } else if (student.status === 'submitted' || student.status === 'published') {
-                    // Entra senza problemi per vedere la correzione/risultati
-                    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
-                    setSession({ pin, cls }); setView('student');
-                    callback({ ok: true });
-                } else if (student.status === 'playing') {
-                    // ESERCITAZIONE: nessun blocco anti-furbetto, rientro sempre consentito.
-                    // Se il docente ha appena sbloccato (resumeAllowed), concedo comunque UN rientro.
-                    if (esercitazione || student.resumeAllowed) {
-                        const updated = { ...student, resumeAllowed: false };
-                        sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
-                        setSession({ pin, cls }); setView('student');
-                        syncUpdateCloud(cls, pin, updated);
-                        callback({ ok: true });
-                    } else {
-                        // Blocco anti-furbetto: era in corso e sta entrando da un altro dispositivo/scheda
-                        const updated = { ...student, status: 'locked' };
-                        sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
-                        setSession({ pin, cls }); setView('student');
-                        syncUpdateCloud(cls, pin, updated);
-                        callback({ ok: true });
+            const salvaSessione = (pin, sess) => {
+                sessRef.current = { pin, sess: sess || null };
+                try { sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, sess: sess || null })); } catch (e) { }
+            };
+            const dimenticaSessione = () => {
+                sessRef.current = null; vistaRef.current = null; pendRef.current = {}; inVoloRef.current = {};
+                try { sessionStorage.removeItem(SESSION_KEY); } catch (e) { }
+            };
+            const tornaIngresso = () => { dimenticaSessione(); setVista(null); setBussa(null); setView('landing'); };
+            const chiaviSessione = () => ({ p_pin: sessRef.current.pin, p_sess: sessRef.current.sess, p_dispositivo: codiceDispositivo() });
+
+            // La scheda che arriva dal cloud non deve far tornare indietro una risposta appena data e non ancora confermata.
+            const mettiVista = (v) => {
+                if (v && v.student && v.student.status === 'playing') {
+                    const sopra = { ...inVoloRef.current, ...pendRef.current };
+                    if (Object.keys(sopra).length) {
+                        const answers = { ...(v.student.answers || {}) };
+                        Object.keys(sopra).forEach(k => { answers[k] = { selection: sopra[k] }; });
+                        v = { ...v, student: { ...v.student, answers } };
                     }
-                } else if (student.status === 'locked') {
-                    // Già bloccato, va alla pagina di blocco
-                    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, cls }));
-                    setSession({ pin, cls }); setView('student');
-                    callback({ ok: true });
+                }
+                vistaRef.current = v; setVista(v);
+            };
+
+            const ricaricaVista = async () => {
+                const se = sessRef.current; if (!se) return;
+                try {
+                    const r = await porta('ver_mio', chiaviSessione());
+                    if (sessRef.current !== se) return;
+                    if (r && r.ok && r.vista) mettiVista(r.vista);
+                    else if (r && r.sparito) tornaIngresso();
+                } catch (e) { }
+            };
+
+            const batti = async (fuori, subito) => {
+                const se = sessRef.current;
+                if (!se || salutatoRef.current) return;
+                // rete lenta: se un battito e' per strada da meno di 8 secondi non ne accodo un altro (i segnali di uscita si')
+                if (!subito && battitoVoloRef.current && Date.now() - battitoVoloRef.current < 8000) return;
+                battitoVoloRef.current = Date.now();
+                let r = null;
+                try { r = await porta('ver_battito', { ...chiaviSessione(), p_fuori: !!fuori, p_seq: prossimoSeq() }, true); } catch (e) { }
+                battitoVoloRef.current = 0;
+                if (!r || sessRef.current !== se) return;
+                if (r.sparito) { tornaIngresso(); return; }
+                if (r.ok === false) {
+                    rifiutiRef.current++;
+                    if (rifiutiRef.current >= 2) { dimenticaSessione(); setVista(null); setView('chiusa'); }
+                    return;
+                }
+                rifiutiRef.current = 0;
+                if (r.status === 'idle') { tornaIngresso(); return; }      // il docente ha ricaricato o azzerato la classe
+                const v = vistaRef.current;
+                if (v && r.impronta && r.impronta !== v.impronta) ricaricaVista();
+            };
+
+            const spedisciRisposte = async () => {
+                if (inviandoRispRef.current || !sessRef.current || Object.keys(pendRef.current).length === 0) return;
+                const se = sessRef.current;
+                inviandoRispRef.current = true;
+                inVoloRef.current = pendRef.current; pendRef.current = {};
+                let r = null;
+                try { r = await porta('ver_rispondi', { ...chiaviSessione(), p_risposte: inVoloRef.current }); } catch (e) { r = null; }
+                if (sessRef.current !== se) { inviandoRispRef.current = false; return; }
+                if (r && r.ok) {
+                    inVoloRef.current = {}; inviandoRispRef.current = false;
+                    if (Object.keys(pendRef.current).length) spedisciRisposte();
+                } else if (r && r.ok === false && r.status) {
+                    // la prova non e' piu' in corso (consegna forzata dal docente): cio' che era salvo resta salvo
+                    inVoloRef.current = {}; pendRef.current = {}; inviandoRispRef.current = false;
+                    ricaricaVista();
+                } else {
+                    // rete caduta, oppure gettone rifiutato (lo decide il battito se la sessione e' chiusa): non butto niente
+                    pendRef.current = { ...inVoloRef.current, ...pendRef.current }; inVoloRef.current = {};
+                    inviandoRispRef.current = false;
+                    if (r && r.ok === false) batti(document.visibilityState === 'hidden' || !document.hasFocus(), true);
+                    setTimeout(spedisciRisposte, r ? 3000 : 1500);
                 }
             };
+
+            const rispondi = (qid, selection) => {
+                const v = vistaRef.current;
+                if (!v || !v.student || v.student.status !== 'playing') return;
+                const nv = { ...v, student: { ...v.student, answers: { ...(v.student.answers || {}), [qid]: { selection } } } };
+                vistaRef.current = nv; setVista(nv);
+                pendRef.current = { ...pendRef.current, [qid]: selection };
+                spedisciRisposte();
+            };
+
+            // La consegna porta con se' TUTTE le risposte che ho sullo schermo: cosi' l'ultima lettera non resta per strada.
+            const consegna = async () => {
+                const se = sessRef.current, v = vistaRef.current;
+                if (!se || !v) return false;
+                const tutte = {};
+                Object.keys(v.student.answers || {}).forEach(k => { const a = v.student.answers[k]; if (a && a.selection !== undefined && a.selection !== null) tutte[k] = a.selection; });
+                try {
+                    const r = await portaPaziente('ver_consegna', { ...chiaviSessione(), p_risposte: tutte }, 4);
+                    if (r && r.ok) {
+                        pendRef.current = {}; inVoloRef.current = {};
+                        if (r.vista) mettiVista(r.vista); else ricaricaVista();
+                        return true;
+                    }
+                } catch (e) { }
+                return false;
+            };
+
+            const riprova = async () => {
+                const se = sessRef.current; if (!se) return false;
+                try {
+                    const r = await portaPaziente('ver_riprova', { p_pin: se.pin, p_dispositivo: codiceDispositivo() }, 3);
+                    if (r && r.ok) { pendRef.current = {}; inVoloRef.current = {}; salvaSessione(se.pin, r.sessione); mettiVista(r.vista); return true; }
+                } catch (e) { }
+                return false;
+            };
+
+            const entra = (pin, r) => {
+                pendRef.current = {}; inVoloRef.current = {}; rifiutiRef.current = 0; salutatoRef.current = false;
+                salvaSessione(pin, r.sessione);
+                mettiVista(r.vista);
+                setBussa(null); setView('student');
+            };
+
+            const handleStudentLogin = async (pin, callback) => {
+                let r = null;
+                try { r = await portaPaziente('ver_entra', { p_pin: pin, p_dispositivo: codiceDispositivo() }, 3); }
+                catch (e) { callback({ ok: false, msg: "Il collegamento non risponde: il tuo PIN non c'entra. Riprova fra un momento." }); return; }
+                if (!r || !r.trovato) { callback({ ok: false, msg: "PIN non censito a sistema." }); return; }
+                if (r.vuota) { callback({ ok: false, msg: "Nessuna prova attiva per la tua classe." }); return; }
+                if (!r.allow) { setBussa({ pin, nome: r.nome || '' }); setView('bloccato'); callback({ ok: true }); return; }
+                entra(pin, r);
+                callback({ ok: true });
+            };
+
+            // Chi e' fermo su «Accesso bloccato» ribussa da solo ogni 5 secondi: appena il docente preme «Sblocca» entra,
+            // e se chi lavorava non e' piu' collegato e' questa bussata che fa comparire lo «Sblocca» nel cruscotto.
+            useEffect(() => {
+                if (view !== 'bloccato' || !bussa) return;
+                let vivo = true;
+                const t = setInterval(async () => {
+                    try {
+                        const r = await porta('ver_entra', { p_pin: bussa.pin, p_dispositivo: codiceDispositivo() });
+                        if (!vivo || !r) return;
+                        if (!r.trovato) { tornaIngresso(); return; }
+                        if (r.allow) entra(bussa.pin, r);
+                    } catch (e) { }
+                }, 5000);
+                return () => { vivo = false; clearInterval(t); };
+            }, [view, bussa && bussa.pin]);
+
+            /* BATTITO + PALLINO ROSSO. Ogni 5 secondi, e subito a ogni cambio (scheda cambiata, finestra abbassata,
+               altra app, schermo spento, clic fuori dalla finestra): dice al cloud «sono qui» e se la pagina e' davanti
+               o no. Quando la pagina si chiude davvero saluta (ver_esci): il docente vede «Non collegato» all'istante.
+               Un'app uccisa dal telefono non puo' salutare: li' si aspetta che scadano i 20 secondi. */
+            useEffect(() => {
+                if (view !== 'student') return;
+                salutatoRef.current = false; rifiutiRef.current = 0;
+                const fuoriAdesso = () => document.visibilityState === 'hidden' || !document.hasFocus();
+                const stato = () => batti(fuoriAdesso(), true);
+                const via = () => batti(true, true);
+                const riapre = () => { salutatoRef.current = false; stato(); };
+                const chiude = (e) => {
+                    if (e && e.persisted) { via(); return; }        // pagina solo messa da parte: vale come uscita
+                    if (salutatoRef.current || !sessRef.current) return;
+                    const resto = { ...inVoloRef.current, ...pendRef.current };
+                    try {
+                        if (Object.keys(resto).length) porta('ver_rispondi', { ...chiaviSessione(), p_risposte: resto }, true).catch(() => {});
+                        porta('ver_esci', chiaviSessione(), true).catch(() => {});
+                    } catch (err) { }
+                    salutatoRef.current = true;                     // dopo il saluto il browser manda ancora un «nascosta»: non deve sorpassarlo
+                };
+                stato();
+                document.addEventListener('visibilitychange', stato);
+                window.addEventListener('blur', via);
+                window.addEventListener('focus', stato);
+                window.addEventListener('pageshow', riapre);
+                window.addEventListener('pagehide', chiude);
+                document.addEventListener('freeze', via);
+                document.addEventListener('resume', stato);
+                const t = setInterval(() => batti(fuoriAdesso(), false), 5000);
+                return () => {
+                    clearInterval(t);
+                    document.removeEventListener('visibilitychange', stato);
+                    window.removeEventListener('blur', via);
+                    window.removeEventListener('focus', stato);
+                    window.removeEventListener('pageshow', riapre);
+                    window.removeEventListener('pagehide', chiude);
+                    document.removeEventListener('freeze', via);
+                    document.removeEventListener('resume', stato);
+                };
+            }, [view]);
+
+            // F5 o scheda ripristinata: la sessione sta in sessionStorage, il gettone e' ancora buono.
+            useEffect(() => {
+                let raw = null;
+                try { raw = sessionStorage.getItem(SESSION_KEY); } catch (e) { }
+                if (!raw) { setLoading(false); return; }
+                (async () => {
+                    try {
+                        const salvata = JSON.parse(raw);
+                        const r = await portaPaziente('ver_mio', { p_pin: String(salvata.pin), p_sess: salvata.sess || null, p_dispositivo: codiceDispositivo() }, 3);
+                        if (r && r.ok && r.vista && r.vista.student.status !== 'idle') {
+                            sessRef.current = { pin: String(salvata.pin), sess: salvata.sess || null };
+                            mettiVista(r.vista); setView('student');
+                        } else dimenticaSessione();
+                    } catch (e) { }
+                    setLoading(false);
+                })();
+            }, []);
 
             if (loading) {
                 return (
@@ -2050,8 +2234,10 @@
                 );
             }
 
-            if (view === 'admin') return <AdminApp db={db} onSyncUpdate={syncUpdateCloud} onResetDB={resetDatabaseCloud} onExit={() => setView('landing')} />;
-            if (view === 'student' && session) return <StudentApp pin={session.pin} cls={session.cls} db={db} onSyncUpdate={syncUpdateCloud} onExit={() => { sessionStorage.removeItem(SESSION_KEY); setSession(null); setView('landing'); }} />;
+            if (view === 'admin') return <AdminApp db={db} onSyncUpdate={syncUpdateCloud} onResetDB={resetDatabaseCloud} onExit={async () => { try { await supabase.auth.signOut({ scope: 'local' }); } catch (e) { } setView('landing'); }} />;
+            if (view === 'student' && vista) return <StudentApp vista={vista} azioni={{ rispondi, consegna, riprova }} />;
+            if (view === 'bloccato' && bussa) return <SchermoBloccato nome={bussa.nome} />;
+            if (view === 'chiusa') return <SessioneChiusa onTorna={() => setView('landing')} />;
             return <Landing onStudent={handleStudentLogin} onAdmin={() => setView('admin')} />;
         };
 
