@@ -103,7 +103,12 @@
         const SUPABASE_URL = "https://zwuutlrafdmfqexbnohc.supabase.co"; 
         const SUPABASE_ANON_KEY = "sb_publishable_6oCmDuDh_8ibf-p4ZAcfZg_muXXuO8N"; 
 
-        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        // Il riconoscimento del docente sta nella memoria DELLA SCHEDA (sessionStorage): resiste a un F5, ma chiusa la
+        // scheda non c'e' piu' e alla prossima apertura la password si ridigita, come in Cedolino Facile.
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+            auth: { storage: window.sessionStorage, storageKey: 'ver-docente-auth', persistSession: true, autoRefreshToken: true }
+        });
+        const DOCENTE_KEY = 'ver_docente_attivo';
 
         /* =====================================================================
            SCRITTURE A PEZZETTI (19/09/2026) — mai piu' «riscrivo tutto»
@@ -623,16 +628,7 @@
 
             // DOCENTE: si entra con l'utente del cloud (lo stesso di Cedolino Facile). La password non sta nella pagina:
             // la controlla il cloud, e il cloud controlla anche che quell'utente sia nell'elenco dei docenti.
-            const apriDocente = async () => {
-                setPwErr(""); setAdminPwOpen(true);
-                try {
-                    const { data } = await supabase.auth.getSession();
-                    if (data && data.session) {
-                        const r = await supabase.rpc('cf_e_docente');
-                        if (r.data === true) { setAdminPwOpen(false); onAdmin(); }
-                    }
-                } catch (e) { }
-            };
+            const apriDocente = () => { setPwErr(""); setPw(""); setAdminPwOpen(true); };
             const submitPw = async () => {
                 if (attesa) return;
                 if (!mail.trim() || !pw) { setPwErr("Scrivi email e password."); return; }
@@ -1921,6 +1917,7 @@
                     setDb({ version: 1, classes });
                 } else if (!error && data === null) {
                     // Il cloud non mi riconosce piu' come docente (collegamento scaduto): non resto su un cruscotto muto.
+                    try { sessionStorage.removeItem(DOCENTE_KEY); } catch (e) { }
                     setView('landing');
                     alert("Il collegamento da docente è scaduto: rientra con email e password.");
                 }
@@ -2210,6 +2207,23 @@
 
             // F5 o scheda ripristinata: la sessione sta in sessionStorage, il gettone e' ancora buono.
             useEffect(() => {
+                let eraDocente = null;
+                try { eraDocente = sessionStorage.getItem(DOCENTE_KEY); } catch (e) { }
+                if (eraDocente) {
+                    // DOCENTE: dopo un F5 resta nel cruscotto, ma solo se il cloud lo riconosce ancora.
+                    (async () => {
+                        try {
+                            const { data } = await supabase.auth.getSession();
+                            if (data && data.session) {
+                                const r = await supabase.rpc('cf_e_docente');
+                                if (r.data === true) { setView('admin'); setLoading(false); return; }
+                            }
+                        } catch (e) { }
+                        try { sessionStorage.removeItem(DOCENTE_KEY); } catch (e) { }
+                        setLoading(false);
+                    })();
+                    return;
+                }
                 let raw = null;
                 try { raw = sessionStorage.getItem(SESSION_KEY); } catch (e) { }
                 if (!raw) { setLoading(false); return; }
@@ -2234,11 +2248,11 @@
                 );
             }
 
-            if (view === 'admin') return <AdminApp db={db} onSyncUpdate={syncUpdateCloud} onResetDB={resetDatabaseCloud} onExit={async () => { try { await supabase.auth.signOut({ scope: 'local' }); } catch (e) { } setView('landing'); }} />;
+            if (view === 'admin') return <AdminApp db={db} onSyncUpdate={syncUpdateCloud} onResetDB={resetDatabaseCloud} onExit={async () => { try { sessionStorage.removeItem(DOCENTE_KEY); } catch (e) { } try { await supabase.auth.signOut({ scope: 'local' }); } catch (e) { } setView('landing'); }} />;
             if (view === 'student' && vista) return <StudentApp vista={vista} azioni={{ rispondi, consegna, riprova }} />;
             if (view === 'bloccato' && bussa) return <SchermoBloccato nome={bussa.nome} />;
             if (view === 'chiusa') return <SessioneChiusa onTorna={() => setView('landing')} />;
-            return <Landing onStudent={handleStudentLogin} onAdmin={() => setView('admin')} />;
+            return <Landing onStudent={handleStudentLogin} onAdmin={() => { try { sessionStorage.setItem(DOCENTE_KEY, '1'); } catch (e) { } setView('admin'); }} />;
         };
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
