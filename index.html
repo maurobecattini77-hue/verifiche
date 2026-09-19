@@ -163,12 +163,14 @@
         /* PALLINO ROSSO. Il segnale «sono uscito / sono rientrato» NON passa da app_state (dove stanno le risposte):
            va in uno scomparto suo (ver_segnali) attraverso la porta ver_segnale. Parte con fetch keepalive perche'
            un telefono congela la pagina subito dopo averla mandata dietro, e una richiesta normale morirebbe li'. */
-        const segnalaFuori = (pin, fuori) => {
+        let ultimoSeq = 0;
+        const segnalaFuori = (pin, fuori, chiusa) => {
             try {
+                ultimoSeq = Math.max(Date.now(), ultimoSeq + 1);   // sempre crescente, anche per due segnali nello stesso millisecondo
                 fetch(SUPABASE_URL + '/rest/v1/rpc/ver_segnale', {
                     method: 'POST', keepalive: true,
                     headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
-                    body: JSON.stringify({ p_pin: String(pin), p_fuori: !!fuori, p_seq: Date.now() })   // p_seq: se due segnali arrivano invertiti, vince il piu' recente
+                    body: JSON.stringify({ p_pin: String(pin), p_fuori: !!fuori, p_seq: ultimoSeq, p_chiusa: !!chiusa })   // p_seq: se due segnali arrivano invertiti, vince il piu' recente
                 }).catch(() => {});
             } catch (e) { }
         };
@@ -396,6 +398,7 @@
             const map = {
                 idle:      { t: "Non iniziato", c: "bg-gray-100 text-gray-500" },
                 playing:   { t: "In corso",     c: "bg-[#aec8ce]/40 text-[#57534a]" },
+                offline:   { t: "Non collegato", c: "bg-gray-100 text-gray-500" },
                 locked:    { t: "Bloccato",     c: "bg-[#b4472f]/10 text-[#b4472f]" },
                 submitted: { t: "Consegnato",   c: "bg-[#ebc871]/30 text-[#7a5c14]" },
                 published: { t: "Pubblicato",   c: "bg-[#5c8b73]/15 text-[#3f6a52]" }
@@ -760,33 +763,39 @@
             const inProva = !!(student && student.status === 'playing');
             useEffect(() => {
                 if (!inProva) return;
-                let ultimo = null, giri = 0;
-                const manda = (fuori) => { if (ultimo === fuori) return; ultimo = fuori; segnalaFuori(pin, fuori); };
+                let ultimo = null, quando = 0;
+                const manda = (fuori) => { if (ultimo === 'chiusa' || ultimo === fuori) return; ultimo = fuori; quando = Date.now(); segnalaFuori(pin, fuori); };
                 const stato = () => manda(document.visibilityState === 'hidden' || !document.hasFocus());
                 const via = () => manda(true);
+                // Pagina CHIUSA davvero (scheda chiusa, F5, altro indirizzo): lo dico, cosi' il docente vede «Non collegato»
+                // e non un «In corso» che non finisce mai. Se invece la pagina viene solo messa da parte, vale come uscita.
+                // Dopo il saluto la pagina tace: il browser manda ancora un «nascosta» mentre chiude, e non deve sorpassarlo.
+                const chiude = (e) => { if (e && e.persisted) { via(); return; } if (ultimo === 'chiusa') return; ultimo = 'chiusa'; segnalaFuori(pin, false, true); };
                 const noCopia = (e) => { e.preventDefault(); };
                 stato();
                 document.addEventListener('visibilitychange', stato);
                 window.addEventListener('blur', via);
                 window.addEventListener('focus', stato);
                 window.addEventListener('pageshow', stato);
-                window.addEventListener('pagehide', via);
+                window.addEventListener('pagehide', chiude);
                 document.addEventListener('freeze', via);
                 document.addEventListener('resume', stato);
                 document.addEventListener('copy', noCopia);
                 document.addEventListener('cut', noCopia);
                 document.addEventListener('contextmenu', noCopia);
                 document.body.classList.add('in-prova');
-                // Rete di sicurezza: ogni 5 secondi ricontrollo, e ogni 20 ridico lo stato anche se non e' cambiato
-                // (se un segnale si e' perso per strada, il successivo rimette le cose a posto).
-                const t = setInterval(() => { giri++; if (giri % 4 === 0) ultimo = null; stato(); }, 5000);
+                // Battito: finche' la pagina e' davanti ridico «sono qui» ogni 5 secondi (il docente mi vede collegato se
+                // ho parlato negli ultimi 20); da fuori basta ridirlo ogni 20 (li' il docente aspetta 90 secondi di silenzio,
+                // perche' il browser fa battere piano le pagine messe dietro). Si conta il TEMPO, non i giri: un timer
+                // rallentato dal browser non deve allungare il silenzio.
+                const t = setInterval(() => { if (ultimo === false || (ultimo === true && Date.now() - quando >= 19000)) ultimo = null; stato(); }, 5000);
                 return () => {
                     clearInterval(t);
                     document.removeEventListener('visibilitychange', stato);
                     window.removeEventListener('blur', via);
                     window.removeEventListener('focus', stato);
                     window.removeEventListener('pageshow', stato);
-                    window.removeEventListener('pagehide', via);
+                    window.removeEventListener('pagehide', chiude);
                     document.removeEventListener('freeze', via);
                     document.removeEventListener('resume', stato);
                     document.removeEventListener('copy', noCopia);
@@ -1001,23 +1010,24 @@
 
             const classData = db.classes[cls];
 
-            /* PALLINO ROSSO: chi, fra gli alunni con la prova IN CORSO, ha lasciato la pagina. Lettura ogni 2 secondi,
+            /* PALLINO ROSSO: chi, fra gli alunni con la prova IN CORSO, ha lasciato la pagina. Lettura ogni secondo,
                solo se c'e' qualcuno al lavoro. Nessun blocco e nessun avviso: solo il pallino accanto al nome. */
             const [rossi, setRossi] = useState({});
+            const [scollegati, setScollegati] = useState({});   // prova in corso ma pagina chiusa (o muta da 20 secondi): «Non collegato»
             const pinInCorso = classData ? Object.values(classData.students).filter(s => s.status === 'playing').map(s => String(s.pin)).sort().join(',') : '';
             useEffect(() => {
-                if (!pinInCorso) { setRossi({}); return; }
+                if (!pinInCorso) { setRossi({}); setScollegati({}); return; }
                 let vivo = true;
                 const leggi = async () => {
                     try {
                         const { data, error } = await supabase.rpc('ver_segnali_leggi', { p_pins: pinInCorso.split(',') });
                         if (!vivo || error || !Array.isArray(data)) return;
-                        const m = {}; data.forEach(r => { if (r.rosso) m[String(r.pin)] = true; });
-                        setRossi(m);
+                        const m = {}, n = {}; data.forEach(r => { if (r.rosso) m[String(r.pin)] = true; if (r.collegato === false) n[String(r.pin)] = true; });
+                        setRossi(m); setScollegati(n);
                     } catch (e) { }
                 };
                 leggi();
-                const t = setInterval(leggi, 2000);
+                const t = setInterval(leggi, 1000);
                 return () => { vivo = false; clearInterval(t); };
             }, [pinInCorso]);
 
@@ -1408,7 +1418,7 @@
                                                             <td className="px-4 py-3 font-semibold text-[#262420] whitespace-nowrap">{s.lastName} {s.firstName}{playing && rossi[String(s.pin)] && <span className="dot-fuori" title="Ha abbassato o lasciato la pagina della prova"></span>}</td>
                                                             <td className="px-4 py-3">
                                                                 <div className="flex items-center gap-2">
-                                                                    <StatusBadge status={s.status}/>
+                                                                    <StatusBadge status={playing && scollegati[String(s.pin)] ? 'offline' : s.status}/>
                                                                     {playing && <span className="text-xs font-bold text-[#57534a]">{answeredCount}/{questions.length}</span>}
                                                                 </div>
                                                             </td>
