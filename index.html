@@ -38,6 +38,12 @@
         .bounce-in { animation: bounceIn 0.7s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards; }
         @keyframes bounceIn { 0% { transform: scale(0); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
         .pulse-red { animation: pulseRed 1.6s ease-in-out infinite; }
+        /* PALLINO ROSSO (19/09/2026): l'alunno ha abbassato o lasciato la pagina della prova */
+        .dot-fuori { display:inline-block; width:12px; height:12px; border-radius:50%; background:#e0261f; margin-left:9px; vertical-align:middle; box-shadow:0 0 0 3px rgba(224,38,31,.22); animation: dotFuori .6s steps(1, end) infinite; }
+        @keyframes dotFuori { 0% { opacity:1; } 50% { opacity:.12; } }
+        /* Durante la prova il testo delle domande non si seleziona e non si copia (le caselle di risposta restano scrivibili) */
+        body.in-prova, body.in-prova *:not(textarea):not(input) { -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+        body.in-prova textarea, body.in-prova input { -webkit-user-select:text; user-select:text; }
         @keyframes pulseRed { 0%,100% { opacity: 1; } 50% { opacity: 0.65; } }
         .scale-hover { transition: transform .15s ease; }
         .scale-hover:hover { transform: scale(1.02); }
@@ -98,6 +104,19 @@
         const SUPABASE_ANON_KEY = "sb_publishable_6oCmDuDh_8ibf-p4ZAcfZg_muXXuO8N"; 
 
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        /* PALLINO ROSSO. Il segnale «sono uscito / sono rientrato» NON passa da app_state (dove stanno le risposte):
+           va in uno scomparto suo (ver_segnali) attraverso la porta ver_segnale. Parte con fetch keepalive perche'
+           un telefono congela la pagina subito dopo averla mandata dietro, e una richiesta normale morirebbe li'. */
+        const segnalaFuori = (pin, fuori) => {
+            try {
+                fetch(SUPABASE_URL + '/rest/v1/rpc/ver_segnale', {
+                    method: 'POST', keepalive: true,
+                    headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
+                    body: JSON.stringify({ p_pin: String(pin), p_fuori: !!fuori, p_seq: Date.now() })   // p_seq: se due segnali arrivano invertiti, vince il piu' recente
+                }).catch(() => {});
+            } catch (e) { }
+        };
 
         const ADMIN_PASSWORD = "16031948";      
         const SESSION_KEY = "ab_exam_session_v1"; 
@@ -680,6 +699,49 @@
                 }
             }, [student && student.status, student && student.resumeAllowed]);
 
+            /* PALLINO ROSSO + NIENTE COPIA (19/09/2026). Vale solo a prova IN CORSO. Non blocca e non avvisa nessuno:
+               dice soltanto alla dashboard del docente che questa pagina non e' piu' davanti agli occhi dell'alunno
+               (scheda cambiata, finestra abbassata, altra app, schermo spento, clic fuori dalla finestra). */
+            const inProva = !!(student && student.status === 'playing');
+            useEffect(() => {
+                if (!inProva) return;
+                let ultimo = null, giri = 0;
+                const manda = (fuori) => { if (ultimo === fuori) return; ultimo = fuori; segnalaFuori(pin, fuori); };
+                const stato = () => manda(document.visibilityState === 'hidden' || !document.hasFocus());
+                const via = () => manda(true);
+                const noCopia = (e) => { e.preventDefault(); };
+                stato();
+                document.addEventListener('visibilitychange', stato);
+                window.addEventListener('blur', via);
+                window.addEventListener('focus', stato);
+                window.addEventListener('pageshow', stato);
+                window.addEventListener('pagehide', via);
+                document.addEventListener('freeze', via);
+                document.addEventListener('resume', stato);
+                document.addEventListener('copy', noCopia);
+                document.addEventListener('cut', noCopia);
+                document.addEventListener('contextmenu', noCopia);
+                document.body.classList.add('in-prova');
+                // Rete di sicurezza: ogni 5 secondi ricontrollo, e ogni 20 ridico lo stato anche se non e' cambiato
+                // (se un segnale si e' perso per strada, il successivo rimette le cose a posto).
+                const t = setInterval(() => { giri++; if (giri % 4 === 0) ultimo = null; stato(); }, 5000);
+                return () => {
+                    clearInterval(t);
+                    document.removeEventListener('visibilitychange', stato);
+                    window.removeEventListener('blur', via);
+                    window.removeEventListener('focus', stato);
+                    window.removeEventListener('pageshow', stato);
+                    window.removeEventListener('pagehide', via);
+                    document.removeEventListener('freeze', via);
+                    document.removeEventListener('resume', stato);
+                    document.removeEventListener('copy', noCopia);
+                    document.removeEventListener('cut', noCopia);
+                    document.removeEventListener('contextmenu', noCopia);
+                    document.body.classList.remove('in-prova');
+                    segnalaFuori(pin, false);   // prova finita o uscita: il pallino non ha piu' senso
+                };
+            }, [inProva, pin]);
+
             const answer = (qid, selection) => {
                 if (student.status !== 'playing') return;
                 const updatedStudent = { ...student };
@@ -883,6 +945,27 @@
             useEffect(() => { if (!cls && classesList.length > 0) setCls(classesList[0]); }, [classesList, cls]);
 
             const classData = db.classes[cls];
+
+            /* PALLINO ROSSO: chi, fra gli alunni con la prova IN CORSO, ha lasciato la pagina. Lettura ogni 2 secondi,
+               solo se c'e' qualcuno al lavoro. Nessun blocco e nessun avviso: solo il pallino accanto al nome. */
+            const [rossi, setRossi] = useState({});
+            const pinInCorso = classData ? Object.values(classData.students).filter(s => s.status === 'playing').map(s => String(s.pin)).sort().join(',') : '';
+            useEffect(() => {
+                if (!pinInCorso) { setRossi({}); return; }
+                let vivo = true;
+                const leggi = async () => {
+                    try {
+                        const { data, error } = await supabase.rpc('ver_segnali_leggi', { p_pins: pinInCorso.split(',') });
+                        if (!vivo || error || !Array.isArray(data)) return;
+                        const m = {}; data.forEach(r => { if (r.rosso) m[String(r.pin)] = true; });
+                        setRossi(m);
+                    } catch (e) { }
+                };
+                leggi();
+                const t = setInterval(leggi, 2000);
+                return () => { vivo = false; clearInterval(t); };
+            }, [pinInCorso]);
+
             const esercitazione = !!(classData && classData.esercitazione);
             const students = classData ? Object.values(classData.students).sort((a,b) => (a.lastName+a.firstName).localeCompare(b.lastName+b.firstName)) : [];
             const questions = (classData && classData.questions) || [];
@@ -1267,7 +1350,7 @@
                                                     return (
                                                         <tr key={s.pin} className="border-t border-gray-100 hover:bg-gray-50/60">
                                                             <td className="px-4 py-3 font-mono font-bold text-[#57534a]">{s.pin}</td>
-                                                            <td className="px-4 py-3 font-semibold text-[#262420] whitespace-nowrap">{s.lastName} {s.firstName}</td>
+                                                            <td className="px-4 py-3 font-semibold text-[#262420] whitespace-nowrap">{s.lastName} {s.firstName}{playing && rossi[String(s.pin)] && <span className="dot-fuori" title="Ha abbassato o lasciato la pagina della prova"></span>}</td>
                                                             <td className="px-4 py-3">
                                                                 <div className="flex items-center gap-2">
                                                                     <StatusBadge status={s.status}/>
