@@ -105,6 +105,61 @@
 
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+        /* =====================================================================
+           SCRITTURE A PEZZETTI (19/09/2026) — mai piu' «riscrivo tutto»
+           Prima ogni modifica rispediva al cloud l'INTERA scheda di tutte le classi, partendo da una copia vecchia
+           fino a 3 secondi: con venti alunni che scrivono insieme, ognuno cancellava le ultime lettere degli altri.
+           Ora si manda solo cio' che e' cambiato (percorso + valore) e il server lo applica in fila, un pezzetto
+           alla volta, sulla riga bloccata (porta ver_applica). Due alunni non possono piu' pestarsi i piedi, e il
+           docente che tocca lo stato di un alunno non tocca le sue risposte.
+        ===================================================================== */
+        const ugualiJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+        // Che cosa e' cambiato fra due fotografie di «classes»: classe intera, campo della classe, alunno intero,
+        // oppure SINGOLO CAMPO dell'alunno (answers, status, openGrades...). E' questa finezza che salva il lavoro.
+        const diffClassi = (base, next) => {
+            const ops = []; base = base || {}; next = next || {};
+            Object.keys(base).forEach(c => { if (!(c in next)) ops.push({ p: ['classes', c], del: true }); });
+            Object.keys(next).forEach(c => {
+                const B = base[c], N = next[c];
+                if (!B || typeof B !== 'object') { ops.push({ p: ['classes', c], v: N }); return; }
+                Object.keys(B).forEach(k => { if (k !== 'students' && !(k in N)) ops.push({ p: ['classes', c, k], del: true }); });
+                Object.keys(N).forEach(k => { if (k !== 'students' && !ugualiJson(B[k], N[k])) ops.push({ p: ['classes', c, k], v: N[k] }); });
+                const BS = B.students, NS = N.students || {};
+                if (!BS || typeof BS !== 'object') { ops.push({ p: ['classes', c, 'students'], v: NS }); return; }
+                Object.keys(BS).forEach(pn => { if (!(pn in NS)) ops.push({ p: ['classes', c, 'students', pn], del: true }); });
+                Object.keys(NS).forEach(pn => {
+                    const b = BS[pn], n = NS[pn];
+                    if (!b || typeof b !== 'object') { ops.push({ p: ['classes', c, 'students', pn], v: n }); return; }
+                    Object.keys(b).forEach(f => { if (!(f in n)) ops.push({ p: ['classes', c, 'students', pn, f], del: true }); });
+                    Object.keys(n).forEach(f => { if (!ugualiJson(b[f], n[f])) ops.push({ p: ['classes', c, 'students', pn, f], v: (n[f] === undefined ? null : n[f]) }); });
+                });
+            });
+            return ops;
+        };
+
+        // Applica i pezzetti a una fotografia di «classes», con la STESSA regola del server: si crea solo l'ultima
+        // chiave del percorso; se la classe o l'alunno non esistono piu', il pezzetto cade nel vuoto.
+        const applicaOps = (classes, ops) => {
+            let root = { classes: classes || {} };
+            (ops || []).forEach(op => {
+                const path = op.p || [];
+                if (path[0] !== 'classes') return;
+                if (path.length === 1) { if (!op.del) root = { classes: op.v || {} }; return; }
+                const nuovo = { ...root }; let src = root, dst = nuovo;
+                for (let i = 0; i < path.length - 1; i++) {
+                    const k = path[i], figlio = src[k];
+                    if (!figlio || typeof figlio !== 'object' || Array.isArray(figlio)) return;   // percorso interrotto
+                    dst[k] = { ...figlio }; src = figlio; dst = dst[k];
+                }
+                const ultima = path[path.length - 1];
+                if (op.del) delete dst[ultima]; else dst[ultima] = op.v;
+                root = nuovo;
+            });
+            return root.classes;
+        };
+        const chiaveOp = (op) => JSON.stringify(op.p);
+
         /* PALLINO ROSSO. Il segnale «sono uscito / sono rientrato» NON passa da app_state (dove stanno le risposte):
            va in uno scomparto suo (ver_segnali) attraverso la porta ver_segnale. Parte con fetch keepalive perche'
            un telefono congela la pagina subito dopo averla mandata dietro, e una richiesta normale morirebbe li'. */
@@ -1810,13 +1865,82 @@
             const [db, setDb] = useState({ version: 1, classes: {} });
             const [loading, setLoading] = useState(true);
 
+            /* Le scritture verso il cloud: una CODA di pezzetti, spediti in fila. Se la rete cade si riprova da
+               soli; se arriva un pezzetto nuovo per lo stesso percorso (la lettera dopo, nella stessa risposta)
+               sostituisce quello ancora in attesa. Nessuna scrittura va persa in silenzio, come capitava prima. */
+            const classesRef = useRef({});     // l'ultima fotografia locale (cloud + cio' che ho scritto io)
+            const codaRef = useRef([]);        // pezzetti da spedire
+            const voloRef = useRef([]);        // pezzetti spediti, in attesa di conferma
+            const fatteRef = useRef([]);       // pezzetti confermati da poco: { op, doneAt }
+            const inviandoRef = useRef(false);
+
             const pullCloudState = async () => {
-                const { data, error } = await supabase.from('app_state').select('db_data, questions_data').eq('id', 1).single();
+                const t0 = Date.now();
+                const { data, error } = await supabase.from('app_state').select('db_data').eq('id', 1).single();
                 if (!error && data) {
-                    setDb({ version: 1, classes: data.db_data?.classes || {} });
+                    let classes = (data.db_data && data.db_data.classes) || {};
+                    // Una lettura partita PRIMA che una mia scrittura fosse confermata puo' non contenerla ancora:
+                    // gliela rimetto sopra, altrimenti il testo appena battuto tornerebbe indietro sotto le dita.
+                    // Le scritture confermate prima che questa lettura partisse ci sono gia' dentro: le dimentico.
+                    fatteRef.current = fatteRef.current.filter(x => x.doneAt > t0);
+                    const sopra = [...fatteRef.current.map(x => x.op), ...voloRef.current, ...codaRef.current];
+                    if (sopra.length) classes = applicaOps(classes, sopra);
+                    classesRef.current = classes;
+                    setDb({ version: 1, classes });
                 }
                 setLoading(false);
             };
+
+            const spedisci = async () => {
+                if (inviandoRef.current || codaRef.current.length === 0) return;
+                inviandoRef.current = true;
+                voloRef.current = codaRef.current; codaRef.current = [];
+                let ok = false;
+                try {
+                    const { data, error } = await supabase.rpc('ver_applica', { p_ops: voloRef.current });
+                    ok = !error && data === true;
+                } catch (e) { ok = false; }
+                if (ok) {
+                    const ora = Date.now();
+                    voloRef.current.forEach(op => fatteRef.current.push({ op, doneAt: ora }));
+                    voloRef.current = [];
+                    inviandoRef.current = false;
+                    if (codaRef.current.length) spedisci();
+                } else {
+                    // Non e' arrivato: rimetto i pezzetti in testa alla coda (tranne quelli gia' superati da uno
+                    // piu' nuovo sullo stesso percorso) e riprovo fra poco. Il lavoro non si butta mai.
+                    const nuovi = {}; codaRef.current.forEach(op => { nuovi[chiaveOp(op)] = true; });
+                    codaRef.current = [...voloRef.current.filter(op => !nuovi[chiaveOp(op)]), ...codaRef.current];
+                    voloRef.current = [];
+                    inviandoRef.current = false;
+                    setTimeout(spedisci, 1500);
+                }
+            };
+            const accoda = (ops) => {
+                ops.forEach(op => {
+                    const k = chiaveOp(op);
+                    codaRef.current = codaRef.current.filter(x => chiaveOp(x) !== k);
+                    codaRef.current.push(op);
+                });
+                spedisci();
+            };
+
+            // Pagina che si chiude con qualcosa ancora da spedire (l'ultima lettera): parte comunque, con keepalive.
+            useEffect(() => {
+                const ultimoInvio = () => {
+                    const resto = [...voloRef.current, ...codaRef.current];
+                    if (!resto.length) return;
+                    try {
+                        fetch(SUPABASE_URL + '/rest/v1/rpc/ver_applica', {
+                            method: 'POST', keepalive: true,
+                            headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
+                            body: JSON.stringify({ p_ops: resto })
+                        }).catch(() => {});
+                    } catch (e) { }
+                };
+                window.addEventListener('pagehide', ultimoInvio);
+                return () => window.removeEventListener('pagehide', ultimoInvio);
+            }, []);
 
             useEffect(() => {
                 pullCloudState();
@@ -1837,20 +1961,24 @@
                 } catch (e) { }
             }, []);
 
+            // Stessa firma di prima (la usano tutti i punti dell'app), ma al cloud va SOLO la differenza.
             const syncUpdateCloud = async (cls, pin, updatedStudentData, fullClasses = null) => {
-                let currentClasses = fullClasses ? fullClasses : { ...db.classes };
-
-                if (cls && pin && updatedStudentData) {
-                    currentClasses[cls].students[pin] = updatedStudentData;
-                }
-
-                setDb({ version: 1, classes: currentClasses });
-                await supabase.from('app_state').update({ db_data: { classes: currentClasses }, questions_data: [] }).eq('id', 1);
+                const base = classesRef.current || {};
+                let next;
+                if (fullClasses) next = fullClasses;
+                else if (cls && pin && updatedStudentData && base[cls]) {
+                    next = { ...base, [cls]: { ...base[cls], students: { ...(base[cls].students || {}), [pin]: updatedStudentData } } };
+                } else return;
+                const ops = diffClassi(base, next);
+                classesRef.current = next;
+                setDb({ version: 1, classes: next });
+                if (ops.length) accoda(ops);
             };
 
             const resetDatabaseCloud = async () => {
+                classesRef.current = {};
                 setDb({ version: 1, classes: {} });
-                await supabase.from('app_state').update({ db_data: { classes: {} }, questions_data: [] }).eq('id', 1);
+                accoda([{ p: ['classes'], v: {} }]);
             };
 
             const handleStudentLogin = (pin, callback) => {
