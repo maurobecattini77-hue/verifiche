@@ -1397,7 +1397,7 @@
                                                     const bd = computeBreakdown(s, questions);
                                                     const hasOpen = bd.openMax > 0;
                                                     const tot = submitted ? bd.total : null;
-                                                    const canView = submitted || playing;
+                                                    const canView = submitted || (playing && !scollegati[String(s.pin)]);   // «Non collegato»: riga nuda, nessun pulsante
                                                     return (
                                                         <tr key={s.pin} className="border-t border-gray-100 hover:bg-gray-50/60">
                                                             <td className="px-4 py-3 font-mono font-bold text-[#57534a]">{s.pin}</td>
