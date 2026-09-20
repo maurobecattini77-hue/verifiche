@@ -110,6 +110,10 @@
         });
         const DOCENTE_KEY = 'ver_docente_attivo';
 
+        // «Becattini Prof» e' l'alunno dimostrativo del docente: negli elenchi sta sempre in cima.
+        const eProf = (s) => !!s && /\bbecattini\b/i.test(s.lastName || '') && /\bprof\b/i.test(s.firstName || '');
+        const profInCima = (a, b) => (eProf(b) ? 1 : 0) - (eProf(a) ? 1 : 0);
+
         /* =====================================================================
            SCRITTURE A PEZZETTI (19/09/2026) — mai piu' «riscrivo tutto»
            Prima ogni modifica rispediva al cloud l'INTERA scheda di tutte le classi, partendo da una copia vecchia
@@ -1028,7 +1032,7 @@
             }, [pinInCorso]);
 
             const esercitazione = !!(classData && classData.esercitazione);
-            const students = classData ? Object.values(classData.students).sort((a,b) => (a.lastName+a.firstName).localeCompare(b.lastName+b.firstName)) : [];
+            const students = classData ? Object.values(classData.students).sort((a,b) => profInCima(a,b) || (a.lastName+a.firstName).localeCompare(b.lastName+b.firstName)) : [];
             const questions = (classData && classData.questions) || [];
             const examTitle = (classData && classData.examTitle) || '';
             const maxClosed = questions.filter(q => q.type === 'single').reduce((a, q) => a + q.points, 0);
@@ -1614,7 +1618,7 @@
         const PrintArea = ({ cls, classData, questions, maxClosed, maxOpen, maxTotal }) => {
             const students = Object.values(classData.students)
                 .filter(s => s.status === 'submitted' || s.status === 'published')
-                .sort((a,b) => (a.lastName+a.firstName).localeCompare(b.lastName+b.firstName));
+                .sort((a,b) => profInCima(a,b) || (a.lastName+a.firstName).localeCompare(b.lastName+b.firstName));
 
             const describeAnswer = (q, s) => {
                 const a = s.answers ? s.answers[q.id] : null;
@@ -1733,7 +1737,7 @@
                 const ordered = function(s){
                     var ord=s.questionOrder; if(Array.isArray(ord)&&ord.length){ var byId={}; Q.forEach(function(q){byId[q.id]=q;}); var list=ord.map(function(id){return byId[id];}).filter(Boolean); Q.forEach(function(q){ if(ord.indexOf(q.id)<0) list.push(q); }); return list; } return Q;
                 };
-                const students = Object.keys(D.students).map(function(k){ return D.students[k]; }).sort(function(a,b){ return (a.lastName+a.firstName).localeCompare(b.lastName+b.firstName); });
+                const students = Object.keys(D.students).map(function(k){ return D.students[k]; }).sort(function(a,b){ var pr=function(s){ return /\bbecattini\b/i.test(s.lastName||'') && /\bprof\b/i.test(s.firstName||''); }; return ((pr(b)?1:0)-(pr(a)?1:0)) || (a.lastName+a.firstName).localeCompare(b.lastName+b.firstName); });
 
                 function QView(props){
                     var q=props.q, s=props.s;
