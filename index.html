@@ -170,14 +170,24 @@
            (ver_entra, ver_mio, ver_battito, ver_rispondi, ver_consegna, ver_riprova, ver_esci). Si chiamano sempre
            con la chiave pubblica, mai con il riconoscimento del docente, e con keepalive quando la pagina sta morendo
            (un telefono congela la pagina subito dopo averla mandata dietro: una richiesta normale morirebbe li'). */
+        /* TEMPO MASSIMO (20/09/2026, come in Cedolino Facile e Fattura Facile). Con la rete debole una richiesta puo'
+           restare APPESA: non fallisce e non risponde, e chi aspettava la risposta (l'ingresso, il salvataggio di una
+           risposta, la consegna) restava fermo per sempre, perche' i ritentativi scattano solo davanti a un errore.
+           Dopo 25 secondi la richiesta appesa viene troncata e diventa un errore come gli altri. */
+        const TEMPO_MASSIMO_RICHIESTA_MS = 25000;
         const porta = async (nome, corpo, subito) => {
-            const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/' + nome, {
-                method: 'POST', keepalive: !!subito,
-                headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
-                body: JSON.stringify(corpo || {})
-            });
-            if (!r.ok) throw new Error('HTTP ' + r.status);
-            return r.json();
+            const ac = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+            const sveglia = ac ? setTimeout(() => { try { ac.abort(); } catch (e) {} }, TEMPO_MASSIMO_RICHIESTA_MS) : null;
+            try {
+                const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/' + nome, {
+                    method: 'POST', keepalive: !!subito,
+                    headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
+                    body: JSON.stringify(corpo || {}),
+                    signal: ac ? ac.signal : undefined
+                });
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return await r.json();
+            } finally { if (sveglia) clearTimeout(sveglia); }
         };
         // Come sopra, ma con pazienza: se la rete ha un buco riprova (un buco di rete non e' un PIN sbagliato).
         const portaPaziente = async (nome, corpo, tentativi = 3) => {
@@ -2016,12 +2026,47 @@
             const rifiutiRef = useRef(0);
             const battitoVoloRef = useRef(0);
             const salutatoRef = useRef(false);     // la pagina ha gia' detto «mi chiudo»: dopo, tace
+            /* (20/09/2026) TRE DIFESE IN PIU' PER LA RETE DEBOLE.
+               toccateRef: tutte le risposte date in QUESTA apertura della pagina. Si rimettono sempre sopra la scheda che
+                 arriva dal cloud finche' la prova e' in corso: prima si proteggevano solo quelle ancora per strada, e una
+                 scheda partita PRIMA dell'ultima battuta ma arrivata DOPO la sua conferma riportava indietro il testo.
+               copia locale: le risposte non ancora confermate dal cloud stanno anche nella memoria del dispositivo, col
+                 gettone della sessione. Se la rete cade e l'alunno ricarica la pagina, al ritorno (stesso gettone) si
+                 rimettono in coda: prima vivevano solo nella memoria della pagina e un F5 senza rete le perdeva.
+               vistaSeq/vistaVolo: una lettura della scheda alla volta, e una risposta vecchia non scavalca una nuova. */
+            const toccateRef = useRef({});
+            const vistaSeqRef = useRef(0);
+            const vistaVoloRef = useRef(0);
+            const ritentaRef = useRef(null);
+            const annullaRipristinoRef = useRef(false);
+            const [reteDebole, setReteDebole] = useState(false);
+            const chiaveLocale = (pin) => 'ver_risposte_' + pin;
+            const scriviLocale = () => {
+                const se = sessRef.current; if (!se) return;
+                try {
+                    const r = { ...inVoloRef.current, ...pendRef.current };
+                    if (Object.keys(r).length) localStorage.setItem(chiaveLocale(se.pin), JSON.stringify({ t: Date.now(), sess: se.sess || null, r }));
+                    else localStorage.removeItem(chiaveLocale(se.pin));
+                } catch (e) { }
+            };
+            const leggiLocale = (pin, sess) => {
+                try {
+                    const j = JSON.parse(localStorage.getItem(chiaveLocale(pin)) || 'null');
+                    // Vale SOLO per la stessa sessione (stesso gettone) e per sei ore: se nel frattempo l'alunno ha lavorato
+                    // da un altro dispositivo il gettone e' cambiato, e queste risposte vecchie non devono tornare sopra.
+                    if (j && j.r && typeof j.r === 'object' && j.sess && j.sess === (sess || null) && Date.now() - (j.t || 0) < 6 * 3600 * 1000) return j.r;
+                } catch (e) { }
+                return {};
+            };
+            const buttaLocale = (pin) => { try { if (pin) localStorage.removeItem(chiaveLocale(pin)); } catch (e) { } };
 
             const salvaSessione = (pin, sess) => {
                 sessRef.current = { pin, sess: sess || null };
                 try { sessionStorage.setItem(SESSION_KEY, JSON.stringify({ pin, sess: sess || null })); } catch (e) { }
             };
             const dimenticaSessione = () => {
+                if (sessRef.current) buttaLocale(sessRef.current.pin);
+                toccateRef.current = {};
                 sessRef.current = null; vistaRef.current = null; pendRef.current = {}; inVoloRef.current = {};
                 try { sessionStorage.removeItem(SESSION_KEY); } catch (e) { }
             };
@@ -2031,7 +2076,7 @@
             // La scheda che arriva dal cloud non deve far tornare indietro una risposta appena data e non ancora confermata.
             const mettiVista = (v) => {
                 if (v && v.student && v.student.status === 'playing') {
-                    const sopra = { ...inVoloRef.current, ...pendRef.current };
+                    const sopra = { ...toccateRef.current, ...inVoloRef.current, ...pendRef.current };
                     if (Object.keys(sopra).length) {
                         const answers = { ...(v.student.answers || {}) };
                         Object.keys(sopra).forEach(k => { answers[k] = { selection: sopra[k] }; });
@@ -2043,12 +2088,17 @@
 
             const ricaricaVista = async () => {
                 const se = sessRef.current; if (!se) return;
+                // una lettura alla volta (rete lenta: prima se ne accodavano anche cinque, e una vecchia scavalcava una nuova)
+                if (vistaVoloRef.current && Date.now() - vistaVoloRef.current < 8000) return;
+                vistaVoloRef.current = Date.now();
+                const mia = ++vistaSeqRef.current;
                 try {
                     const r = await porta('ver_mio', chiaviSessione());
-                    if (sessRef.current !== se) return;
+                    if (sessRef.current !== se || mia !== vistaSeqRef.current) return;
                     if (r && r.ok && r.vista) mettiVista(r.vista);
                     else if (r && r.sparito) tornaIngresso();
                 } catch (e) { }
+                finally { if (mia === vistaSeqRef.current) vistaVoloRef.current = 0; }
             };
 
             const batti = async (fuori, subito) => {
@@ -2056,10 +2106,11 @@
                 if (!se || salutatoRef.current) return;
                 // rete lenta: se un battito e' per strada da meno di 8 secondi non ne accodo un altro (i segnali di uscita si')
                 if (!subito && battitoVoloRef.current && Date.now() - battitoVoloRef.current < 8000) return;
-                battitoVoloRef.current = Date.now();
+                const mioBattito = Date.now();
+                battitoVoloRef.current = mioBattito;
                 let r = null;
                 try { r = await porta('ver_battito', { ...chiaviSessione(), p_fuori: !!fuori, p_seq: prossimoSeq() }, true); } catch (e) { }
-                battitoVoloRef.current = 0;
+                if (battitoVoloRef.current === mioBattito) battitoVoloRef.current = 0;
                 if (!r || sessRef.current !== se) return;
                 if (r.sparito) { tornaIngresso(); return; }
                 if (r.ok === false) {
@@ -2083,17 +2134,21 @@
                 if (sessRef.current !== se) { inviandoRispRef.current = false; return; }
                 if (r && r.ok) {
                     inVoloRef.current = {}; inviandoRispRef.current = false;
+                    scriviLocale();
                     if (Object.keys(pendRef.current).length) spedisciRisposte();
                 } else if (r && r.ok === false && r.status) {
                     // la prova non e' piu' in corso (consegna forzata dal docente): cio' che era salvo resta salvo
                     inVoloRef.current = {}; pendRef.current = {}; inviandoRispRef.current = false;
+                    toccateRef.current = {}; scriviLocale();
                     ricaricaVista();
                 } else {
                     // rete caduta, oppure gettone rifiutato (lo decide il battito se la sessione e' chiusa): non butto niente
                     pendRef.current = { ...inVoloRef.current, ...pendRef.current }; inVoloRef.current = {};
                     inviandoRispRef.current = false;
                     if (r && r.ok === false) batti(document.visibilityState === 'hidden' || !document.hasFocus(), true);
-                    setTimeout(spedisciRisposte, r ? 3000 : 1500);
+                    // UN SOLO ritentativo armato: prima ne nasceva uno per ogni tasto battuto a rete assente
+                    if (ritentaRef.current) clearTimeout(ritentaRef.current);
+                    ritentaRef.current = setTimeout(() => { ritentaRef.current = null; spedisciRisposte(); }, r ? 3000 : 1500);
                 }
             };
 
@@ -2103,6 +2158,8 @@
                 const nv = { ...v, student: { ...v.student, answers: { ...(v.student.answers || {}), [qid]: { selection } } } };
                 vistaRef.current = nv; setVista(nv);
                 pendRef.current = { ...pendRef.current, [qid]: selection };
+                toccateRef.current = { ...toccateRef.current, [qid]: selection };
+                scriviLocale();
                 spedisciRisposte();
             };
 
@@ -2115,7 +2172,7 @@
                 try {
                     const r = await portaPaziente('ver_consegna', { ...chiaviSessione(), p_risposte: tutte }, 4);
                     if (r && r.ok) {
-                        pendRef.current = {}; inVoloRef.current = {};
+                        pendRef.current = {}; inVoloRef.current = {}; toccateRef.current = {}; buttaLocale(se.pin);
                         if (r.vista) mettiVista(r.vista); else ricaricaVista();
                         return true;
                     }
@@ -2127,13 +2184,14 @@
                 const se = sessRef.current; if (!se) return false;
                 try {
                     const r = await portaPaziente('ver_riprova', { p_pin: se.pin, p_dispositivo: codiceDispositivo() }, 3);
-                    if (r && r.ok) { pendRef.current = {}; inVoloRef.current = {}; salvaSessione(se.pin, r.sessione); mettiVista(r.vista); return true; }
+                    if (r && r.ok) { pendRef.current = {}; inVoloRef.current = {}; toccateRef.current = {}; buttaLocale(se.pin); salvaSessione(se.pin, r.sessione); mettiVista(r.vista); return true; }
                 } catch (e) { }
                 return false;
             };
 
             const entra = (pin, r) => {
-                pendRef.current = {}; inVoloRef.current = {}; rifiutiRef.current = 0; salutatoRef.current = false;
+                // Ingresso col PIN = gettone NUOVO: una copia locale rimasta da una sessione di prima non vale piu'.
+                pendRef.current = {}; inVoloRef.current = {}; toccateRef.current = {}; buttaLocale(pin); rifiutiRef.current = 0; salutatoRef.current = false;
                 salvaSessione(pin, r.sessione);
                 mettiVista(r.vista);
                 setBussa(null); setView('student');
@@ -2155,13 +2213,19 @@
             useEffect(() => {
                 if (view !== 'bloccato' || !bussa) return;
                 let vivo = true;
+                let bussataInVolo = false;   // rete lenta: se la bussata di prima non e' tornata, questo giro si salta.
+                                             // Due bussate insieme dopo lo «Sblocca» davano DUE gettoni: la pagina teneva il
+                                             // primo, il cloud il secondo, e dopo dieci secondi compariva «Sessione chiusa».
                 const t = setInterval(async () => {
+                    if (bussataInVolo) return;
+                    bussataInVolo = true;
                     try {
                         const r = await porta('ver_entra', { p_pin: bussa.pin, p_dispositivo: codiceDispositivo() });
                         if (!vivo || !r) return;
                         if (!r.trovato) { tornaIngresso(); return; }
                         if (r.allow) entra(bussa.pin, r);
                     } catch (e) { }
+                    finally { bussataInVolo = false; }
                 }, 5000);
                 return () => { vivo = false; clearInterval(t); };
             }, [view, bussa && bussa.pin]);
@@ -2174,7 +2238,14 @@
                 if (view !== 'student') return;
                 salutatoRef.current = false; rifiutiRef.current = 0;
                 const fuoriAdesso = () => document.visibilityState === 'hidden' || !document.hasFocus();
-                const stato = () => batti(fuoriAdesso(), true);
+                // Un dispositivo che manda la pagina dietro puo' congelarla o ucciderla senza preavviso: cio' che non e'
+                // ancora confermato parte subito con l'invio che il browser spedisce comunque (keepalive).
+                const salvaResto = () => {
+                    if (!sessRef.current || salutatoRef.current) return;
+                    const resto = { ...inVoloRef.current, ...pendRef.current };
+                    try { if (Object.keys(resto).length) porta('ver_rispondi', { ...chiaviSessione(), p_risposte: resto }, true).catch(() => {}); } catch (e) { }
+                };
+                const stato = () => { if (document.visibilityState === 'hidden') salvaResto(); batti(fuoriAdesso(), true); };
                 const via = () => batti(true, true);
                 const riapre = () => { salutatoRef.current = false; stato(); };
                 const chiude = (e) => {
@@ -2233,12 +2304,27 @@
                 (async () => {
                     try {
                         const salvata = JSON.parse(raw);
-                        const r = await portaPaziente('ver_mio', { p_pin: String(salvata.pin), p_sess: salvata.sess || null, p_dispositivo: codiceDispositivo() }, 3);
+                        // (20/09/2026) NON SI ARRENDE: prima dopo tre tentativi l'alunno si ritrovava alla schermata del PIN
+                        // senza una parola, pur avendo il gettone ancora buono. Ora insiste finche' il cloud risponde; dopo
+                        // il secondo tentativo a vuoto lo dice, e lascia comunque la strada del PIN.
+                        let r = null, giri = 0;
+                        while (!annullaRipristinoRef.current) {
+                            try { r = await porta('ver_mio', { p_pin: String(salvata.pin), p_sess: salvata.sess || null, p_dispositivo: codiceDispositivo() }); break; }
+                            catch (e) { giri++; if (giri >= 2) setReteDebole(true); await new Promise(ok => setTimeout(ok, Math.min(1500 + giri * 1000, 6000))); }
+                        }
+                        if (annullaRipristinoRef.current) { setLoading(false); return; }
                         if (r && r.ok && r.vista && r.vista.student.status !== 'idle') {
                             sessRef.current = { pin: String(salvata.pin), sess: salvata.sess || null };
+                            // le risposte che non avevano fatto in tempo ad arrivare al cloud (stesso gettone): di nuovo in coda
+                            if (r.vista.student.status === 'playing') {
+                                const rimaste = leggiLocale(String(salvata.pin), salvata.sess || null);
+                                if (Object.keys(rimaste).length) { pendRef.current = { ...rimaste }; toccateRef.current = { ...rimaste }; }
+                            }
                             mettiVista(r.vista); setView('student');
+                            if (Object.keys(pendRef.current).length) spedisciRisposte();
                         } else dimenticaSessione();
                     } catch (e) { }
+                    setReteDebole(false);
                     setLoading(false);
                 })();
             }, []);
@@ -2246,7 +2332,15 @@
             if (loading) {
                 return (
                     <div className="flex-grow flex items-center justify-center bg-[#eef0ea]">
-                        <div className="text-center font-bold text-[#57534a] text-lg">Connessione al Cloud Engine in corso...</div>
+                        <div className="text-center font-bold text-[#57534a] text-lg">
+                            {reteDebole ? 'Il collegamento è debole: sto riaprendo la tua prova…' : 'Connessione al Cloud Engine in corso...'}
+                            {reteDebole && (
+                                <div className="mt-4 text-sm font-normal">
+                                    Le risposte che hai scritto sono al sicuro.
+                                    <div className="mt-3"><button className="underline" onClick={() => { annullaRipristinoRef.current = true; setLoading(false); }}>Entra col PIN</button></div>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 );
             }
