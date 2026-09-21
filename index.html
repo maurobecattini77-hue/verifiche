@@ -996,6 +996,7 @@
             const [viewPin, setViewPin] = useState(null);    
             const [reopenPin, setReopenPin] = useState(null);
             const [resetOpen, setResetOpen] = useState(false);
+            const [provaNuova, setProvaNuova] = useState(null);   // verifica letta dal file, in attesa del «Sì, procedi» (classe con una verifica gia' svolta)
             const [resetText, setResetText] = useState("");
             const [pubOpen, setPubOpen] = useState(false);
             const [printingCls, setPrintingCls] = useState(null);
@@ -1078,6 +1079,11 @@
                         const domande = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.domande) ? parsed.domande : null);
                         if (!domande || domande.length === 0) throw new Error("Nessuna domanda trovata.");
                         const titolo = (!Array.isArray(parsed) && parsed && parsed.titolo) ? String(parsed.titolo) : '';
+                        // (21/09/2026, chiesto da Mauro) Se in questa classe qualcuno ha gia' iniziato o consegnato la verifica di
+                        // prima, le sue risposte (salvate per numero di domanda) finirebbero corrette contro le domande nuove, e
+                        // rientrando col PIN vedrebbe le soluzioni della verifica nuova senza averla fatta. Quindi si chiede
+                        // conferma e, col si', si scarica il backup, si rimettono tutti a zero e si abbina la verifica nuova.
+                        if (Object.values(classData.students || {}).some(s => s && s.status && s.status !== 'idle')) { setProvaNuova({ domande, titolo }); return; }
                         const updatedClasses = { ...db.classes, [cls]: { ...classData, questions: domande, examTitle: titolo } };
                         onSyncUpdate(null, null, null, updatedClasses);
                         alert(`Verifica abbinata alla classe ${cls} (${domande.length} domande${titolo ? ' · ' + titolo : ''}).`);
@@ -1085,6 +1091,26 @@
                 };
                 reader.readAsText(file);
                 e.target.value = "";
+            };
+
+            // VERIFICA NUOVA su una classe che ne ha gia' svolta una: backup, alunni a zero (stessi PIN), verifica abbinata.
+            // Gli alunni si RICREANO da capo, come fa «Carica classe»: mai ritoccare le schede che vengono da db.classes.
+            const confermaProvaNuova = () => {
+                if (!provaNuova || !cls || !classData) { setProvaNuova(null); return; }
+                exportBackup();                // i risultati della verifica di prima non si perdono
+                const azzerati = {};
+                Object.keys(classData.students || {}).forEach(p => {
+                    const s = classData.students[p];
+                    azzerati[p] = {
+                        pin: String(s.pin), firstName: s.firstName, lastName: s.lastName,
+                        status: 'idle', answers: {}, openAnswer: '', openScore: null,
+                        openComment: '', closedScore: null, graded: false, startedAt: null, submittedAt: null
+                    };
+                });
+                const updatedClasses = { ...db.classes, [cls]: { ...classData, published: false, students: azzerati, questions: provaNuova.domande, examTitle: provaNuova.titolo } };
+                onSyncUpdate(null, null, null, updatedClasses);
+                alert(`Verifica abbinata alla classe ${cls} (${provaNuova.domande.length} domande${provaNuova.titolo ? ' · ' + provaNuova.titolo : ''}). Backup scaricato, alunni rimessi a zero.`);
+                setProvaNuova(null);
             };
 
             // ESERCITAZIONE: attiva/disattiva la modalità esercitazione per la classe selezionata.
@@ -1519,6 +1545,19 @@
                                 <div className="grid grid-cols-2 gap-3">
                                     <button onClick={() => setPubOpen(false)} className="py-3 rounded-xl font-bold border-2 border-[#57534a] text-[#57534a] hover:bg-gray-50">Annulla</button>
                                     <button onClick={pubblica} className="py-3 rounded-xl font-bold bg-[#5c8b73] text-white hover:brightness-95">Sblocca per gli studenti</button>
+                                </div>
+                            </div>
+                        </Modal>
+                    )}
+
+                    {provaNuova && (
+                        <Modal onClose={() => setProvaNuova(null)}>
+                            <div className="text-center">
+                                <h3 className="text-xl font-extrabold text-[#57534a]">Nella classe {cls} c'è una verifica già svolta</h3>
+                                <p className="text-sm text-[#827f75] mt-2 mb-5">Per abbinare la verifica nuova{provaNuova.titolo ? <span> (<b>{provaNuova.titolo}</b>)</span> : null} scarico il <b>backup</b> dei risultati di adesso e rimetto <b>tutti gli alunni a zero</b>, con gli stessi PIN. Se annulli non cambia niente.</p>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button onClick={() => setProvaNuova(null)} className="py-3 rounded-xl font-bold border-2 border-[#57534a] text-[#57534a] hover:bg-gray-50">Annulla</button>
+                                    <button onClick={confermaProvaNuova} className="py-3 rounded-xl font-bold bg-[#5c8b73] text-white hover:brightness-95">Sì, procedi</button>
                                 </div>
                             </div>
                         </Modal>
