@@ -1200,8 +1200,14 @@
                 const updatedStudents = { ...classData.students };
                 Object.keys(updatedStudents).forEach(p => {
                     if (updatedStudents[p].status === 'submitted' || updatedStudents[p].status === 'published') {
-                        if (updatedStudents[p].closedScore == null) updatedStudents[p].closedScore = computeClosedScore(updatedStudents[p], questions);
-                        updatedStudents[p].status = 'published';
+                        // (21/09/2026) Si lavora su una COPIA della scheda, come negli altri pulsanti. Prima lo stato veniva
+                        // cambiato sulla scheda stessa: da quando al cloud va solo la differenza (19/09), «prima» e «dopo»
+                        // erano lo stesso oggetto, la differenza risultava vuota e al cloud arrivava solo «classe pubblicata».
+                        // L'alunno restava su «Verifica consegnata» senza vedere i risultati.
+                        const st = { ...updatedStudents[p] };
+                        if (st.closedScore == null) st.closedScore = computeClosedScore(st, questions);
+                        st.status = 'published';
+                        updatedStudents[p] = st;
                     }
                 });
                 const updatedClasses = { ...db.classes, [cls]: { ...classData, published: true, students: updatedStudents } };
