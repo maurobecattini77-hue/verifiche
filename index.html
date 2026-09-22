@@ -38,9 +38,9 @@
         .bounce-in { animation: bounceIn 0.7s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards; }
         @keyframes bounceIn { 0% { transform: scale(0); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
         .pulse-red { animation: pulseRed 1.6s ease-in-out infinite; }
-        /* PALLINO ROSSO (19/09/2026): l'alunno ha abbassato o lasciato la pagina della prova */
-        .dot-fuori { display:inline-block; width:12px; height:12px; border-radius:50%; background:#e0261f; margin-left:9px; vertical-align:middle; box-shadow:0 0 0 3px rgba(224,38,31,.22); animation: dotFuori .6s steps(1, end) infinite; }
-        @keyframes dotFuori { 0% { opacity:1; } 50% { opacity:.12; } }
+        /* PALLINO ROSSO (19/09/2026): l'alunno ha abbassato o lasciato la pagina della prova.
+           22/09/2026, come in Cedolino Facile: PICCOLO e ROSSO FISSO, niente lampeggio. */
+        .dot-fuori { display:inline-block; width:8px; height:8px; border-radius:50%; background:#e0261f; margin-left:8px; vertical-align:middle; }
         /* Durante la prova il testo delle domande non si seleziona e non si copia (le caselle di risposta restano scrivibili) */
         body.in-prova, body.in-prova *:not(textarea):not(input) { -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
         body.in-prova textarea, body.in-prova input { -webkit-user-select:text; user-select:text; }
@@ -336,6 +336,28 @@
             if (Array.isArray(a.selection)) return a.selection.length > 0;
             if (typeof a.selection === 'object') return Object.keys(a.selection).length > 0;
             return true;
+        };
+
+        /* UN COGNOME E UN NOME (22/09/2026, regola di Mauro). In 4F «Rodriguez Figueroa Emely Massiel» (32 caratteri)
+           spingeva la tabella del cruscotto oltre il bordo e la colonna delle azioni finiva tagliata. La tabella resta
+           com'e' (1152 px, celle e caselle di prima): e' il nome che si accorcia. Nel cruscotto si mostrano UN cognome e
+           UN nome: il primo cognome (con la sua particella: «De Luca», «Di Maria» restano interi) e il primo nome.
+           Tetto di sicurezza: NOME_MAX caratteri, misurati sulla tabella vera (con 22 la 3F ci stava per tre pixel);
+           oltre, resta il cognome e del nome solo l'iniziale. La regola si applica anche quando si CARICA una classe,
+           cosi' nel cloud vale per qualunque classe futura. Il PIN identifica comunque ognuno. */
+        const NOME_MAX = 21;
+        const PARTICELLE = /^(de|di|del|della|dello|dei|degli|delle|da|dal|dalla|dallo|la|lo|le|van|von|der|den|mc|mac|san|santa|el|al|ben|bin|abu|d'|dell')$/i;
+        const primaParola = (testo, conParticella) => {
+            const parole = String(testo || '').trim().split(/\s+/).filter(Boolean);
+            if (!parole.length) return '';
+            let n = 1;
+            if (conParticella) while (n < parole.length && PARTICELLE.test(parole[n - 1].replace(/’$/, "'"))) n++;
+            return parole.slice(0, n).join(' ');
+        };
+        const nomeBreve = (cognome, nome) => {
+            const c = primaParola(cognome, true), n = primaParola(nome, false);
+            if ((c + ' ' + n).trim().length <= NOME_MAX || !n) return (c + ' ' + n).trim();
+            return (c + ' ' + n.charAt(0) + '.').trim();
         };
 
         // Numero "all'italiana" (virgola decimale)
@@ -1012,8 +1034,14 @@
             const classData = db.classes[cls];
 
             /* PALLINO ROSSO: chi, fra gli alunni con la prova IN CORSO, ha lasciato la pagina. Lettura ogni secondo,
-               solo se c'e' qualcuno al lavoro. Nessun blocco e nessun avviso: solo il pallino accanto al nome. */
+               solo se c'e' qualcuno al lavoro. Nessun blocco e nessun avviso: solo il pallino accanto al nome.
+               22/09/2026, la regola di Cedolino Facile (lezione in 5H): il pallino NON dipende dal collegamento. Il
+               telefono congela la pagina abbassata, i battiti si fermano e dopo 20 secondi l'alunno non e' piu'
+               «collegato»: prima il pallino si spegneva pur essendo lui ancora fuori, e si riaccendeva al primo battito.
+               Ora resta acceso su TUTTI quelli con la pagina dietro, insieme, finche' ognuno non torna («sono tornato»)
+               o non chiude (ver_esci azzera «fuori»); dopo il rientro resta ancora 3 secondi, come prima. */
             const [rossi, setRossi] = useState({});
+            const codaRossiRef = useRef({});   // pin -> ultimo istante in cui era fuori (per i 3 secondi di coda)
             const [scollegati, setScollegati] = useState({});   // prova in corso ma pagina chiusa (o muta da 20 secondi): «Non collegato»
             const pinInCorso = classData ? Object.values(classData.students).filter(s => s.status === 'playing').map(s => String(s.pin)).sort().join(',') : '';
             useEffect(() => {
@@ -1023,7 +1051,13 @@
                     try {
                         const { data, error } = await supabase.rpc('ver_segnali_leggi', { p_pins: pinInCorso.split(',') });
                         if (!vivo || error || !Array.isArray(data)) return;
-                        const m = {}, n = {}; data.forEach(r => { if (r.rosso) m[String(r.pin)] = true; if (r.collegato === false) n[String(r.pin)] = true; });
+                        const m = {}, n = {}, adesso = Date.now(), coda = codaRossiRef.current;
+                        data.forEach(r => {
+                            const pin = String(r.pin);
+                            if (r.fuori) coda[pin] = adesso;
+                            if (r.fuori || (coda[pin] && adesso - coda[pin] < 3000)) m[pin] = true;
+                            if (r.collegato === false) n[pin] = true;
+                        });
                         setRossi(m); setScollegati(n);
                     } catch (e) { }
                 };
@@ -1052,7 +1086,7 @@
                         const newStudents = {};
                         parsed.alunni.forEach(al => {
                             newStudents[al.pin] = {
-                                pin: String(al.pin), firstName: al.nome, lastName: al.cognome,
+                                pin: String(al.pin), firstName: primaParola(al.nome, false), lastName: primaParola(al.cognome, true),   // un cognome e un nome (vedi nomeBreve)
                                 status: 'idle', answers: {}, openAnswer: '', openScore: null,
                                 openComment: '', closedScore: null, graded: false, startedAt: null, submittedAt: null
                             };
@@ -1426,15 +1460,15 @@
                                         <table className="w-full text-sm">
                                             <thead>
                                                 <tr className="bg-gray-50 text-[#827f75] text-left">
-                                                    <th className="px-3 py-3 font-bold">PIN</th>
-                                                    <th className="px-3 py-3 font-bold">Studente</th>
-                                                    <th className="px-3 py-3 font-bold">Stato</th>
-                                                    <th className="px-3 py-3 font-bold text-center">Chiuse</th>
-                                                    <th className="px-3 py-3 font-bold text-center">Aperte</th>
-                                                    <th className="px-3 py-3 font-bold text-center">Totale</th>
-                                                    <th className="px-3 py-3 font-bold text-center">%</th>
-                                                    <th className="px-3 py-3 font-bold text-center">Voto</th>
-                                                    <th className="px-3 py-3 font-bold text-right">Azioni</th>
+                                                    <th className="px-4 py-3 font-bold">PIN</th>
+                                                    <th className="px-4 py-3 font-bold">Studente</th>
+                                                    <th className="px-4 py-3 font-bold">Stato</th>
+                                                    <th className="px-4 py-3 font-bold text-center">Chiuse</th>
+                                                    <th className="px-4 py-3 font-bold text-center">Aperte</th>
+                                                    <th className="px-4 py-3 font-bold text-center">Totale</th>
+                                                    <th className="px-4 py-3 font-bold text-center">%</th>
+                                                    <th className="px-4 py-3 font-bold text-center">Voto</th>
+                                                    <th className="px-4 py-3 font-bold text-right">Azioni</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -1449,23 +1483,22 @@
                                                     const canView = submitted || (playing && !scollegati[String(s.pin)]);   // «Non collegato»: riga nuda, nessun pulsante
                                                     return (
                                                         <tr key={s.pin} className="border-t border-gray-100 hover:bg-gray-50/60">
-                                                            <td className="px-3 py-3 font-mono font-bold text-[#57534a]">{s.pin}</td>
-                                                            <td className="px-3 py-3 font-semibold text-[#262420]">{s.lastName} {s.firstName}{playing && rossi[String(s.pin)] && !scollegati[String(s.pin)] && <span className="dot-fuori" title="Ha abbassato o lasciato la pagina della prova"></span>}</td>
-                                                            <td className="px-3 py-3">
+                                                            <td className="px-4 py-3 font-mono font-bold text-[#57534a]">{s.pin}</td>
+                                                            <td className="px-4 py-3 font-semibold text-[#262420] whitespace-nowrap">{nomeBreve(s.lastName, s.firstName)}{playing && rossi[String(s.pin)] && <span className="dot-fuori" title="Ha abbassato o lasciato la pagina della prova"></span>}</td>
+                                                            <td className="px-4 py-3">
                                                                 <div className="flex items-center gap-2">
                                                                     <StatusBadge status={playing && scollegati[String(s.pin)] ? 'offline' : s.status}/>
                                                                     {playing && !scollegati[String(s.pin)] && <span title="Risposte date finora" className="text-xs font-bold text-[#57534a]">{answeredCount}/{questions.length}</span>}
                                                                 </div>
                                                             </td>
-                                                            <td className="px-3 py-3 text-center font-semibold text-[#57534a]">{submitted ? `${fmtN(bd.closedScore)}/${fmtN(bd.closedMax)}` : '—'}</td>
-                                                            <td className="px-3 py-3 text-center font-semibold">{submitted ? (hasOpen ? (s.graded ? `${fmtN(bd.openScore)}/${fmtN(bd.openMax)}` : <span className="text-[#b4472f]">da valutare</span>) : '—') : '—'}</td>
-                                                            <td className="px-3 py-3 text-center">{tot != null ? <span className="inline-flex items-center gap-1 font-extrabold text-[#57534a]">{fmtN(tot)}/{fmtN(bd.totalMax)}{s.status === 'published' && <Icon name="lock" size={12} className="text-[#5c8b73]" />}</span> : <span className="text-gray-400">—</span>}</td>
-                                                            <td className="px-3 py-3 text-center font-bold text-[#57534a]">{tot != null ? `${Math.round(bd.percent)}%` : '—'}</td>
-                                                            <td className="px-3 py-3 text-center">{tot != null ? <span className={`font-extrabold ${bd.percent >= SOGLIA_SUFFICIENZA ? 'text-[#5c8b73]' : 'text-[#b4472f]'}`}>{votoFromPercent(bd.percent)}</span> : <span className="text-gray-400">—</span>}</td>
-                                                            <td className="px-3 py-3">
-                                                                {/* Tre caselle di larghezza fissa: ogni pulsante ha la sua colonna, così Sfoglia / Riprendi / Riapri restano incolonnati qualunque sia la scritta.
-                                                                    (22/09/2026) In 4F la colonna Azioni finiva tagliata a destra: il nome più lungo della classe, con il divieto di andare a capo, spingeva la tabella oltre i 1152 px del cruscotto. Ora celle da px-3, caselle da 6rem e nome che può andare a capo se proprio non ci sta. */}
-                                                                <div className="grid justify-end gap-1.5" style={{ gridTemplateColumns: 'repeat(3, 6rem)' }}>
+                                                            <td className="px-4 py-3 text-center font-semibold text-[#57534a]">{submitted ? `${fmtN(bd.closedScore)}/${fmtN(bd.closedMax)}` : '—'}</td>
+                                                            <td className="px-4 py-3 text-center font-semibold">{submitted ? (hasOpen ? (s.graded ? `${fmtN(bd.openScore)}/${fmtN(bd.openMax)}` : <span className="text-[#b4472f]">da valutare</span>) : '—') : '—'}</td>
+                                                            <td className="px-4 py-3 text-center">{tot != null ? <span className="inline-flex items-center gap-1 font-extrabold text-[#57534a]">{fmtN(tot)}/{fmtN(bd.totalMax)}{s.status === 'published' && <Icon name="lock" size={12} className="text-[#5c8b73]" />}</span> : <span className="text-gray-400">—</span>}</td>
+                                                            <td className="px-4 py-3 text-center font-bold text-[#57534a]">{tot != null ? `${Math.round(bd.percent)}%` : '—'}</td>
+                                                            <td className="px-4 py-3 text-center">{tot != null ? <span className={`font-extrabold ${bd.percent >= SOGLIA_SUFFICIENZA ? 'text-[#5c8b73]' : 'text-[#b4472f]'}`}>{votoFromPercent(bd.percent)}</span> : <span className="text-gray-400">—</span>}</td>
+                                                            <td className="px-4 py-3">
+                                                                {/* Tre caselle di larghezza fissa: ogni pulsante ha la sua colonna, così Sfoglia / Riprendi / Riapri restano incolonnati qualunque sia la scritta */}
+                                                                <div className="grid justify-end gap-1.5" style={{ gridTemplateColumns: 'repeat(3, 6.5rem)' }}>
                                                                     {locked && <button onClick={() => sblocca(s.pin)} style={{ gridRow: 1, gridColumn: 3 }} className="bg-[#aec8ce]/30 text-[#57534a] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center justify-center gap-1 hover:bg-[#aec8ce]/60"><Icon name="unlock" size={14}/> Sblocca</button>}
                                                                     {playing && !scollegati[String(s.pin)] && <button onClick={() => consegnaForzata(s.pin)} title="Consegna forzata di questo studente" style={{ gridRow: 1, gridColumn: 2 }} className="bg-[#d99a4e]/20 text-[#8a5a1c] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center justify-center gap-1 hover:bg-[#d99a4e]/40"><Icon name="send" size={14}/> Consegna</button>}
                                                                     {canView && <button onClick={() => setViewPin(s.pin)} style={{ gridRow: 1, gridColumn: 1 }} className="bg-gray-100 text-[#57534a] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center justify-center gap-1 hover:bg-gray-200"><Icon name="eye" size={14}/> Sfoglia</button>}
@@ -2287,7 +2320,15 @@
             useEffect(() => {
                 if (view !== 'student') return;
                 salutatoRef.current = false; rifiutiRef.current = 0;
-                const fuoriAdesso = () => document.visibilityState === 'hidden' || !document.hasFocus();
+                /* (22/09/2026) PALLINO FALSO: Bosio in 3G e Castellengo in 4F erano sulla pagina, eppure il pallino e'
+                   rimasto acceso 54 e 86 secondi. Su Android la tendina di una domanda di abbinamento (e la tastiera di
+                   una casella) e' una finestrella a parte: la pagina PERDE IL FUOCO (blur, hasFocus() falso) pur restando
+                   in vista, e ogni battito ripeteva «fuori» finche' l'alunno non toccava altro. Regola: se la pagina e'
+                   IN VISTA e il fuoco sta su una tendina o una casella della prova, l'alunno e' qui. «Fuori» resta vero
+                   quando la pagina e' nascosta (altra app, schermo spento, scheda cambiata) o quando il fuoco se n'e'
+                   andato senza un campo attivo (un'altra finestra sul computer). */
+                const suUnCampo = () => { const a = document.activeElement; return !!(a && /^(SELECT|INPUT|TEXTAREA)$/.test(a.tagName)); };
+                const fuoriAdesso = () => document.visibilityState === 'hidden' || (!document.hasFocus() && !suUnCampo());
                 // Un dispositivo che manda la pagina dietro puo' congelarla o ucciderla senza preavviso: cio' che non e'
                 // ancora confermato parte subito con l'invio che il browser spedisce comunque (keepalive).
                 const salvaResto = () => {
@@ -2296,7 +2337,7 @@
                     try { if (Object.keys(resto).length) porta('ver_rispondi', { ...chiaviSessione(), p_risposte: resto }, true).catch(() => {}); } catch (e) { }
                 };
                 const stato = () => { if (document.visibilityState === 'hidden') salvaResto(); batti(fuoriAdesso(), true); };
-                const via = () => batti(true, true);
+                const via = () => { if (document.visibilityState !== 'hidden' && suUnCampo()) return; batti(true, true); };
                 const riapre = () => { salutatoRef.current = false; stato(); };
                 const chiude = (e) => {
                     if (e && e.persisted) { via(); return; }        // pagina solo messa da parte: vale come uscita
