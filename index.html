@@ -1426,15 +1426,15 @@
                                         <table className="w-full text-sm">
                                             <thead>
                                                 <tr className="bg-gray-50 text-[#827f75] text-left">
-                                                    <th className="px-4 py-3 font-bold">PIN</th>
-                                                    <th className="px-4 py-3 font-bold">Studente</th>
-                                                    <th className="px-4 py-3 font-bold">Stato</th>
-                                                    <th className="px-4 py-3 font-bold text-center">Chiuse</th>
-                                                    <th className="px-4 py-3 font-bold text-center">Aperte</th>
-                                                    <th className="px-4 py-3 font-bold text-center">Totale</th>
-                                                    <th className="px-4 py-3 font-bold text-center">%</th>
-                                                    <th className="px-4 py-3 font-bold text-center">Voto</th>
-                                                    <th className="px-4 py-3 font-bold text-right">Azioni</th>
+                                                    <th className="px-3 py-3 font-bold">PIN</th>
+                                                    <th className="px-3 py-3 font-bold">Studente</th>
+                                                    <th className="px-3 py-3 font-bold">Stato</th>
+                                                    <th className="px-3 py-3 font-bold text-center">Chiuse</th>
+                                                    <th className="px-3 py-3 font-bold text-center">Aperte</th>
+                                                    <th className="px-3 py-3 font-bold text-center">Totale</th>
+                                                    <th className="px-3 py-3 font-bold text-center">%</th>
+                                                    <th className="px-3 py-3 font-bold text-center">Voto</th>
+                                                    <th className="px-3 py-3 font-bold text-right">Azioni</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -1449,22 +1449,23 @@
                                                     const canView = submitted || (playing && !scollegati[String(s.pin)]);   // «Non collegato»: riga nuda, nessun pulsante
                                                     return (
                                                         <tr key={s.pin} className="border-t border-gray-100 hover:bg-gray-50/60">
-                                                            <td className="px-4 py-3 font-mono font-bold text-[#57534a]">{s.pin}</td>
-                                                            <td className="px-4 py-3 font-semibold text-[#262420] whitespace-nowrap">{s.lastName} {s.firstName}{playing && rossi[String(s.pin)] && !scollegati[String(s.pin)] && <span className="dot-fuori" title="Ha abbassato o lasciato la pagina della prova"></span>}</td>
-                                                            <td className="px-4 py-3">
+                                                            <td className="px-3 py-3 font-mono font-bold text-[#57534a]">{s.pin}</td>
+                                                            <td className="px-3 py-3 font-semibold text-[#262420]">{s.lastName} {s.firstName}{playing && rossi[String(s.pin)] && !scollegati[String(s.pin)] && <span className="dot-fuori" title="Ha abbassato o lasciato la pagina della prova"></span>}</td>
+                                                            <td className="px-3 py-3">
                                                                 <div className="flex items-center gap-2">
                                                                     <StatusBadge status={playing && scollegati[String(s.pin)] ? 'offline' : s.status}/>
                                                                     {playing && !scollegati[String(s.pin)] && <span title="Risposte date finora" className="text-xs font-bold text-[#57534a]">{answeredCount}/{questions.length}</span>}
                                                                 </div>
                                                             </td>
-                                                            <td className="px-4 py-3 text-center font-semibold text-[#57534a]">{submitted ? `${fmtN(bd.closedScore)}/${fmtN(bd.closedMax)}` : '—'}</td>
-                                                            <td className="px-4 py-3 text-center font-semibold">{submitted ? (hasOpen ? (s.graded ? `${fmtN(bd.openScore)}/${fmtN(bd.openMax)}` : <span className="text-[#b4472f]">da valutare</span>) : '—') : '—'}</td>
-                                                            <td className="px-4 py-3 text-center">{tot != null ? <span className="inline-flex items-center gap-1 font-extrabold text-[#57534a]">{fmtN(tot)}/{fmtN(bd.totalMax)}{s.status === 'published' && <Icon name="lock" size={12} className="text-[#5c8b73]" />}</span> : <span className="text-gray-400">—</span>}</td>
-                                                            <td className="px-4 py-3 text-center font-bold text-[#57534a]">{tot != null ? `${Math.round(bd.percent)}%` : '—'}</td>
-                                                            <td className="px-4 py-3 text-center">{tot != null ? <span className={`font-extrabold ${bd.percent >= SOGLIA_SUFFICIENZA ? 'text-[#5c8b73]' : 'text-[#b4472f]'}`}>{votoFromPercent(bd.percent)}</span> : <span className="text-gray-400">—</span>}</td>
-                                                            <td className="px-4 py-3">
-                                                                {/* Tre caselle di larghezza fissa: ogni pulsante ha la sua colonna, così Sfoglia / Riprendi / Riapri restano incolonnati qualunque sia la scritta */}
-                                                                <div className="grid justify-end gap-1.5" style={{ gridTemplateColumns: 'repeat(3, 6.5rem)' }}>
+                                                            <td className="px-3 py-3 text-center font-semibold text-[#57534a]">{submitted ? `${fmtN(bd.closedScore)}/${fmtN(bd.closedMax)}` : '—'}</td>
+                                                            <td className="px-3 py-3 text-center font-semibold">{submitted ? (hasOpen ? (s.graded ? `${fmtN(bd.openScore)}/${fmtN(bd.openMax)}` : <span className="text-[#b4472f]">da valutare</span>) : '—') : '—'}</td>
+                                                            <td className="px-3 py-3 text-center">{tot != null ? <span className="inline-flex items-center gap-1 font-extrabold text-[#57534a]">{fmtN(tot)}/{fmtN(bd.totalMax)}{s.status === 'published' && <Icon name="lock" size={12} className="text-[#5c8b73]" />}</span> : <span className="text-gray-400">—</span>}</td>
+                                                            <td className="px-3 py-3 text-center font-bold text-[#57534a]">{tot != null ? `${Math.round(bd.percent)}%` : '—'}</td>
+                                                            <td className="px-3 py-3 text-center">{tot != null ? <span className={`font-extrabold ${bd.percent >= SOGLIA_SUFFICIENZA ? 'text-[#5c8b73]' : 'text-[#b4472f]'}`}>{votoFromPercent(bd.percent)}</span> : <span className="text-gray-400">—</span>}</td>
+                                                            <td className="px-3 py-3">
+                                                                {/* Tre caselle di larghezza fissa: ogni pulsante ha la sua colonna, così Sfoglia / Riprendi / Riapri restano incolonnati qualunque sia la scritta.
+                                                                    (22/09/2026) In 4F la colonna Azioni finiva tagliata a destra: il nome più lungo della classe, con il divieto di andare a capo, spingeva la tabella oltre i 1152 px del cruscotto. Ora celle da px-3, caselle da 6rem e nome che può andare a capo se proprio non ci sta. */}
+                                                                <div className="grid justify-end gap-1.5" style={{ gridTemplateColumns: 'repeat(3, 6rem)' }}>
                                                                     {locked && <button onClick={() => sblocca(s.pin)} style={{ gridRow: 1, gridColumn: 3 }} className="bg-[#aec8ce]/30 text-[#57534a] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center justify-center gap-1 hover:bg-[#aec8ce]/60"><Icon name="unlock" size={14}/> Sblocca</button>}
                                                                     {playing && !scollegati[String(s.pin)] && <button onClick={() => consegnaForzata(s.pin)} title="Consegna forzata di questo studente" style={{ gridRow: 1, gridColumn: 2 }} className="bg-[#d99a4e]/20 text-[#8a5a1c] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center justify-center gap-1 hover:bg-[#d99a4e]/40"><Icon name="send" size={14}/> Consegna</button>}
                                                                     {canView && <button onClick={() => setViewPin(s.pin)} style={{ gridRow: 1, gridColumn: 1 }} className="bg-gray-100 text-[#57534a] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center justify-center gap-1 hover:bg-gray-200"><Icon name="eye" size={14}/> Sfoglia</button>}
