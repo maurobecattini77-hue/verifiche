@@ -1039,7 +1039,9 @@
                telefono congela la pagina abbassata, i battiti si fermano e dopo 20 secondi l'alunno non e' piu'
                «collegato»: prima il pallino si spegneva pur essendo lui ancora fuori, e si riaccendeva al primo battito.
                Ora resta acceso su TUTTI quelli con la pagina dietro, insieme, finche' ognuno non torna («sono tornato»)
-               o non chiude (ver_esci azzera «fuori»); dopo il rientro resta ancora 3 secondi, come prima. */
+               o non chiude (ver_esci azzera «fuori»); dopo il rientro resta ancora 3 secondi, come prima.
+               22/09/2026 sera, REGOLA DI MAURO del 19/09 ripristinata: su chi e' «Non collegato» il pallino NON c'e'
+               («e' ovvio che puo' guardare il mondo»). Lo decide la riga della tabella, con lo stesso `scollegati`. */
             const [rossi, setRossi] = useState({});
             const codaRossiRef = useRef({});   // pin -> ultimo istante in cui era fuori (per i 3 secondi di coda)
             const [scollegati, setScollegati] = useState({});   // prova in corso ma pagina chiusa (o muta da 20 secondi): «Non collegato»
@@ -1484,7 +1486,7 @@
                                                     return (
                                                         <tr key={s.pin} className="border-t border-gray-100 hover:bg-gray-50/60">
                                                             <td className="px-4 py-3 font-mono font-bold text-[#57534a]">{s.pin}</td>
-                                                            <td className="px-4 py-3 font-semibold text-[#262420] whitespace-nowrap">{nomeBreve(s.lastName, s.firstName)}{playing && rossi[String(s.pin)] && <span className="dot-fuori" title="Ha abbassato o lasciato la pagina della prova"></span>}</td>
+                                                            <td className="px-4 py-3 font-semibold text-[#262420] whitespace-nowrap">{nomeBreve(s.lastName, s.firstName)}{playing && rossi[String(s.pin)] && !scollegati[String(s.pin)] && <span className="dot-fuori" title="Ha abbassato o lasciato la pagina della prova"></span>}</td>
                                                             <td className="px-4 py-3">
                                                                 <div className="flex items-center gap-2">
                                                                     <StatusBadge status={playing && scollegati[String(s.pin)] ? 'offline' : s.status}/>
