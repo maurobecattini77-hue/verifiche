@@ -2329,7 +2329,13 @@
                    IN VISTA e il fuoco sta su una tendina o una casella della prova, l'alunno e' qui. «Fuori» resta vero
                    quando la pagina e' nascosta (altra app, schermo spento, scheda cambiata) o quando il fuoco se n'e'
                    andato senza un campo attivo (un'altra finestra sul computer). */
-                const suUnCampo = () => { const a = document.activeElement; return !!(a && /^(SELECT|INPUT|TEXTAREA)$/.test(a.tagName)); };
+                /* 22/09/2026 sera: la regola vale SOLO sui dispositivi a tocco (come in Cedolino e Fattura Facile). Al computer
+                   le tendine non tolgono il fuoco, e senza questo limite chi aveva appena cliccato una risposta poteva passare a
+                   un'altra finestra senza accendere il pallino (il campo cliccato resta «attivo» anche a finestra lasciata). */
+                const suUnCampo = () => {
+                    try { if (!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches)) return false; } catch (e) { return false; }
+                    const a = document.activeElement; return !!(a && /^(SELECT|INPUT|TEXTAREA)$/.test(a.tagName));
+                };
                 /* FINESTRA RIMPICCIOLITA (22/09/2026, come in Cedolino Facile). Un alunno teneva la prova davanti, col
                    fuoco, in una finestra piccola, e di fianco un altro browser da cui leggere: guardare un'altra finestra
                    non toglie il fuoco, quindi niente pallino. La pagina non vede le altre finestre, ma sa quanto e' grande
