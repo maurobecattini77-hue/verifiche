@@ -2330,7 +2330,29 @@
                    quando la pagina e' nascosta (altra app, schermo spento, scheda cambiata) o quando il fuoco se n'e'
                    andato senza un campo attivo (un'altra finestra sul computer). */
                 const suUnCampo = () => { const a = document.activeElement; return !!(a && /^(SELECT|INPUT|TEXTAREA)$/.test(a.tagName)); };
-                const fuoriAdesso = () => document.visibilityState === 'hidden' || (!document.hasFocus() && !suUnCampo());
+                /* FINESTRA RIMPICCIOLITA (22/09/2026, come in Cedolino Facile). Un alunno teneva la prova davanti, col
+                   fuoco, in una finestra piccola, e di fianco un altro browser da cui leggere: guardare un'altra finestra
+                   non toglie il fuoco, quindi niente pallino. La pagina non vede le altre finestre, ma sa quanto e' grande
+                   la sua rispetto allo schermo del dispositivo (gia' senza la barra delle applicazioni): sotto il 90% della
+                   larghezza o l'85% dell'altezza e' «fuori» (finestra non ingrandita, schermo diviso, finestra mobile del
+                   telefono). Sui telefoni l'altezza non conta mentre si scrive in una casella: la tastiera la accorcia. */
+                const finestraRistretta = () => {
+                    try {
+                        let sw = screen.availWidth || screen.width, sh = screen.availHeight || screen.height;
+                        const fw = window.outerWidth || window.innerWidth, fh = window.outerHeight || window.innerHeight;
+                        if (!sw || !sh || !fw || !fh) return false;
+                        // iPhone e iPad danno lo schermo sempre in verticale: lo giro se la finestra e' in orizzontale
+                        if ((window.innerWidth > window.innerHeight) !== (sw > sh)) { const t = sw; sw = sh; sh = t; }
+                        if (fw < sw * 0.90) return true;
+                        let tocco = false;
+                        try { tocco = window.matchMedia && window.matchMedia('(pointer: coarse)').matches; } catch (e) { }
+                        const a = document.activeElement;
+                        const scrive = !!(a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable));
+                        if (tocco && scrive) return false;
+                        return fh < sh * 0.85;
+                    } catch (e) { return false; }
+                };
+                const fuoriAdesso = () => document.visibilityState === 'hidden' || (!document.hasFocus() && !suUnCampo()) || finestraRistretta();
                 // Un dispositivo che manda la pagina dietro puo' congelarla o ucciderla senza preavviso: cio' che non e'
                 // ancora confermato parte subito con l'invio che il browser spedisce comunque (keepalive).
                 const salvaResto = () => {
@@ -2360,8 +2382,23 @@
                 document.addEventListener('freeze', via);
                 document.addEventListener('resume', stato);
                 const t = setInterval(() => batti(fuoriAdesso(), false), 5000);
+                // Finestra rimpicciolita o ingrandita, schermo diviso aperto o chiuso: lo dico subito (a trascinamento finito).
+                let ridimTimer = null, ultimoRistretta = finestraRistretta();
+                const ridimensiona = () => {
+                    if (ridimTimer) clearTimeout(ridimTimer);
+                    ridimTimer = setTimeout(() => {
+                        ridimTimer = null;
+                        const r = finestraRistretta();
+                        if (r === ultimoRistretta) return;
+                        ultimoRistretta = r;
+                        batti(fuoriAdesso(), true);
+                    }, 400);
+                };
+                window.addEventListener('resize', ridimensiona);
                 return () => {
                     clearInterval(t);
+                    if (ridimTimer) clearTimeout(ridimTimer);
+                    window.removeEventListener('resize', ridimensiona);
                     document.removeEventListener('visibilitychange', stato);
                     window.removeEventListener('blur', via);
                     window.removeEventListener('focus', stato);
