@@ -2521,5 +2521,191 @@
            "Annulla consegna classe (N)" (visibile solo se forcedCount>0) + modale di conferma (undoAllOpen).
       Nessuna modifica a Supabase/schema/costanti; ogni scrittura passa da onSyncUpdate/syncUpdateCloud.
     -->
+<script>
+/* colore e vista del docente per la calcolatrice di questa app */
+window.CALCX_ACCENT = '#57534a';
+window.CALCX_NASCONDI = function(){ try{ return sessionStorage.getItem('ver_docente_attivo') === '1'; }catch(e){ return false; } };
+/* CALCOLATRICE DELL'APP (23/09/2026, chiesta da Mauro). Gli alunni non hanno la calcolatrice e quella di Windows o
+   del telefono fa uscire dalla pagina, e il pallino rosso si accende. Questa sta DENTRO la pagina: l'icona e' fissa
+   in alto a destra, appena sotto l'intestazione dell'app, e resta li' anche scorrendo; la calcolatrice si apre SOLO col clic sull'icona (sul telefono non
+   deve comparire da sola) e si chiude con la X o con un altro clic sull'icona. Il display non e' una casella di
+   testo, cosi' sul telefono non si apre la tastiera. Tutto vive fuori dal resto dell'app (nomi calcx-*). */
+(function(){
+  if(window.__calcx) return; window.__calcx = true;
+  var ACC = window.CALCX_ACCENT || '#3f6b52';
+  var css = ''
+   + '.calcx-btn{position:fixed;top:92px;right:14px;z-index:8000;width:46px;height:46px;border-radius:50%;background:#fff;border:1.5px solid ' + ACC + ';color:' + ACC + ';display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;box-shadow:0 2px 8px rgba(26,32,44,.14);-webkit-tap-highlight-color:transparent;}'
+   + '.calcx-btn svg{width:23px;height:23px;display:block;}'
+   + '.calcx-btn.aperta{background:' + ACC + ';color:#fff;}'
+   + '.calcx-pan{position:fixed;top:148px;right:14px;z-index:8001;width:292px;background:#fff;border:1px solid #d9dee5;border-radius:16px;box-shadow:0 10px 30px rgba(26,32,44,.18);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#1a202c;display:none;user-select:none;-webkit-user-select:none;touch-action:manipulation;}'
+   + '.calcx-pan.aperta{display:block;}.calcx-pan:focus{outline:none;}'
+   + '.calcx-testa{display:flex;align-items:center;justify-content:space-between;padding:10px 10px 6px 16px;cursor:move;touch-action:none;}'
+   + '.calcx-titolo{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#6b7280;}'
+   + '.calcx-x{width:32px;height:32px;border:0;background:transparent;border-radius:8px;color:#6b7280;font-size:22px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;}'
+   + '.calcx-x:hover{background:#f2f5f8;}'
+   + '.calcx-schermo{margin:0 12px 10px;padding:8px 12px 10px;background:#f2f5f8;border-radius:10px;text-align:right;min-height:64px;box-sizing:border-box;}'
+   + '.calcx-conto{font-size:13px;color:#6b7280;min-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
+   + '.calcx-num{font-size:30px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;}'
+   + '.calcx-tasti{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;padding:0 12px 12px;}'
+   + '.calcx-tasti button{height:46px;border-radius:10px;border:1px solid #e2e8f0;background:#fff;color:#1a202c;font-size:19px;font-weight:600;cursor:pointer;font-family:inherit;padding:0;-webkit-tap-highlight-color:transparent;}'
+   + '.calcx-tasti button:active{transform:scale(.96);}'
+   + '.calcx-tasti button.op{background:#f2f5f8;color:' + ACC + ';}'
+   + '.calcx-tasti button.fn{background:#f2f5f8;color:#4a5568;font-size:16px;}'
+   + '.calcx-tasti button.ug{background:' + ACC + ';border-color:' + ACC + ';color:#fff;}'
+   + '@media (max-width:600px){.calcx-btn{top:76px;right:10px;}.calcx-pan{right:10px;top:130px;width:calc(100vw - 20px);max-width:320px;}.calcx-tasti button{height:52px;font-size:21px;}}'
+   + '.calcx-via{display:none !important;}'
+   + '@media print{.calcx-btn,.calcx-pan{display:none !important;}}';
+  var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
+
+  var ICONA = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="16" height="20" x="4" y="2" rx="2"/><line x1="8" x2="16" y1="6" y2="6"/><line x1="16" x2="16" y1="14" y2="18"/><path d="M16 10h.01"/><path d="M12 10h.01"/><path d="M8 10h.01"/><path d="M12 14h.01"/><path d="M8 14h.01"/><path d="M12 18h.01"/><path d="M8 18h.01"/></svg>';
+  var btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'calcx-btn'; btn.title = 'Calcolatrice'; btn.setAttribute('aria-label', 'Calcolatrice');
+  btn.innerHTML = ICONA;
+  var pan = document.createElement('div');
+  pan.className = 'calcx-pan'; pan.setAttribute('role', 'dialog'); pan.setAttribute('aria-label', 'Calcolatrice'); pan.tabIndex = -1;
+  var TASTI = [['C','fn','azzera'],['⌫','fn','cancella'],['%','op','percento'],['÷','op','diviso'],
+               ['7'],['8'],['9'],['×','op','per'],
+               ['4'],['5'],['6'],['−','op','meno'],
+               ['1'],['2'],['3'],['+','op','piu'],
+               ['±','fn','segno'],['0'],[',','','virgola'],['=','ug','uguale']];
+  pan.innerHTML = '<div class="calcx-testa"><span class="calcx-titolo">Calcolatrice</span><button type="button" class="calcx-x" aria-label="Chiudi la calcolatrice">×</button></div>'
+    + '<div class="calcx-schermo"><div class="calcx-conto"></div><div class="calcx-num">0</div></div>'
+    + '<div class="calcx-tasti">' + TASTI.map(function(t){
+        return '<button type="button" class="' + (t[1] || '') + '" data-k="' + (t[2] || t[0]) + '">' + t[0] + '</button>';
+      }).join('') + '</div>';
+  function monta(){ document.body.appendChild(btn); document.body.appendChild(pan); }
+  if(document.body) monta(); else document.addEventListener('DOMContentLoaded', monta);
+
+  var elConto = pan.querySelector('.calcx-conto'), elNum = pan.querySelector('.calcx-num');
+
+  /* ---- il motore: come una calcolatrice da tavolo ---- */
+  var cur = '0', acc = null, op = null, fresco = true, errore = false, conto = '';
+  var SIMBOLO = { '+':'+', '-':'−', '*':'×', '/':'÷' };
+  function tondo(x){ return Math.round(x * 1e10) / 1e10; }
+  function val(s){ return parseFloat(String(s).replace(',', '.')) || 0; }
+  function fmtNum(x){
+    if(!isFinite(x)) return 'Errore';
+    x = tondo(x);
+    var neg = x < 0; x = Math.abs(x);
+    var s = String(x);
+    if(s.indexOf('e') >= 0) s = x.toFixed(10).replace(/0+$/, '').replace(/\.$/, '');
+    var p = s.split('.');
+    var intero = p[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    return (neg ? '−' : '') + intero + (p[1] ? ',' + p[1] : '');
+  }
+  function fmtCur(s){  // quello che si sta scrivendo, coi punti delle migliaia
+    var neg = s.charAt(0) === '-'; if(neg) s = s.slice(1);
+    var p = s.split(',');
+    return (neg ? '−' : '') + p[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.') + (p.length > 1 ? ',' + p[1] : '');
+  }
+  function calcola(a, o, b){
+    if(o === '+') return a + b; if(o === '-') return a - b; if(o === '*') return a * b;
+    if(o === '/') return b === 0 ? NaN : a / b; return b;
+  }
+  function daNumero(x){ var s = String(tondo(x)); if(s.indexOf('e') >= 0) s = tondo(x).toFixed(10).replace(/0+$/, '').replace(/\.$/, ''); return s.replace('.', ','); }
+  function mostra(){
+    elNum.textContent = errore ? 'Errore' : fmtCur(cur);
+    elConto.textContent = conto;
+  }
+  function azzera(){ cur = '0'; acc = null; op = null; fresco = true; errore = false; conto = ''; }
+  function chiudiConto(ris, testo){
+    if(!isFinite(ris)){ azzera(); errore = true; conto = testo; return; }
+    conto = testo; cur = daNumero(ris); acc = null; op = null; fresco = true;
+  }
+  function premi(k){
+    if(errore && k !== 'azzera'){ azzera(); }
+    if(/^[0-9]$/.test(k)){
+      if(fresco){ cur = k; fresco = false; if(acc === null) conto = ''; }
+      else if(cur.replace(/[-,]/g, '').length < 15){ cur = (cur === '0') ? k : (cur === '-0' ? '-' + k : cur + k); }
+    } else if(k === 'virgola'){
+      if(fresco){ cur = '0,'; fresco = false; if(acc === null) conto = ''; }
+      else if(cur.indexOf(',') < 0){ cur += ','; }
+    } else if(k === 'azzera'){ azzera();
+    } else if(k === 'cancella'){
+      if(!fresco){ cur = cur.length > 1 && cur !== '-0' ? cur.slice(0, -1) : '0'; if(cur === '-') cur = '0'; }
+    } else if(k === 'segno'){
+      if(cur !== '0') cur = cur.charAt(0) === '-' ? cur.slice(1) : '-' + cur;
+    } else if(k === 'piu' || k === 'meno' || k === 'per' || k === 'diviso'){
+      var o = { piu:'+', meno:'-', per:'*', diviso:'/' }[k];
+      if(acc !== null && op && !fresco){
+        var r = calcola(acc, op, val(cur));
+        if(!isFinite(r)){ chiudiConto(r, fmtNum(acc) + ' ' + SIMBOLO[op] + ' ' + fmtCur(cur)); mostra(); return; }
+        acc = tondo(r); cur = daNumero(acc);
+      } else if(acc === null || !op){ acc = val(cur); }
+      op = o; fresco = true; conto = fmtNum(acc) + ' ' + SIMBOLO[op];
+    } else if(k === 'uguale'){
+      if(acc !== null && op){
+        var b = val(cur);
+        chiudiConto(calcola(acc, op, b), fmtNum(acc) + ' ' + SIMBOLO[op] + ' ' + fmtCur(cur) + ' =');
+      }
+    } else if(k === 'percento'){
+      var p = val(cur);
+      if(acc !== null && op){
+        var ris = op === '+' ? acc + acc * p / 100 : op === '-' ? acc - acc * p / 100
+                : op === '*' ? acc * p / 100 : (p === 0 ? NaN : acc / (p / 100));
+        chiudiConto(ris, fmtNum(acc) + ' ' + SIMBOLO[op] + ' ' + fmtCur(cur) + ' % =');
+      } else {
+        chiudiConto(p / 100, fmtCur(cur) + ' % =');
+      }
+    }
+    mostra();
+  }
+  pan.querySelector('.calcx-tasti').addEventListener('click', function(ev){
+    var b = ev.target.closest('button[data-k]'); if(!b) return;
+    premi(b.getAttribute('data-k'));
+  });
+  /* tastiera del computer: solo quando si sta usando la calcolatrice (il fuoco e' dentro di lei), cosi' le cifre
+     scritte nelle caselle dell'app restano alle caselle */
+  pan.addEventListener('keydown', function(ev){
+    var k = ev.key, m = null;
+    if(/^[0-9]$/.test(k)) m = k;
+    else if(k === ',' || k === '.') m = 'virgola';
+    else if(k === '+') m = 'piu'; else if(k === '-') m = 'meno';
+    else if(k === '*' || k === 'x' || k === 'X') m = 'per'; else if(k === '/' || k === ':') m = 'diviso';
+    else if(k === '%') m = 'percento';
+    else if(k === 'Enter' || k === '=') m = 'uguale';
+    else if(k === 'Backspace') m = 'cancella';
+    else if(k === 'Delete') m = 'azzera';
+    else if(k === 'Escape'){ ev.preventDefault(); chiudi(); btn.focus(); return; }
+    if(m){ ev.preventDefault(); premi(m); }
+  });
+
+  /* ---- aprire, chiudere, spostare ---- */
+  function apri(){ pan.classList.add('aperta'); btn.classList.add('aperta'); btn.setAttribute('aria-expanded', 'true'); try{ pan.focus({ preventScroll:true }); }catch(e){} }
+  function chiudi(){ pan.classList.remove('aperta'); btn.classList.remove('aperta'); btn.setAttribute('aria-expanded', 'false'); }
+  btn.addEventListener('click', function(){ if(pan.classList.contains('aperta')) chiudi(); else apri(); });
+  pan.querySelector('.calcx-x').addEventListener('click', function(){ chiudi(); });
+  var testa = pan.querySelector('.calcx-testa'), trascina = null;
+  testa.addEventListener('pointerdown', function(ev){
+    if(ev.target.closest('.calcx-x')) return;
+    var r = pan.getBoundingClientRect();
+    trascina = { dx: ev.clientX - r.left, dy: ev.clientY - r.top };
+    try{ testa.setPointerCapture(ev.pointerId); }catch(e){}
+    ev.preventDefault();
+  });
+  testa.addEventListener('pointermove', function(ev){
+    if(!trascina) return;
+    var w = pan.offsetWidth, h = pan.offsetHeight;
+    var x = Math.max(4, Math.min(window.innerWidth - w - 4, ev.clientX - trascina.dx));
+    var y = Math.max(4, Math.min(window.innerHeight - 60, ev.clientY - trascina.dy));
+    pan.style.left = x + 'px'; pan.style.top = y + 'px'; pan.style.right = 'auto';
+  });
+  function lascia(){ trascina = null; }
+  testa.addEventListener('pointerup', lascia); testa.addEventListener('pointercancel', lascia);
+  window.addEventListener('resize', function(){
+    if(!pan.style.left) return;
+    var x = parseFloat(pan.style.left), y = parseFloat(pan.style.top), w = pan.offsetWidth;
+    if(x + w > window.innerWidth - 4 || y > window.innerHeight - 60){ pan.style.left = ''; pan.style.top = ''; pan.style.right = ''; }
+  });
+  /* nella dashboard del docente l'icona non serve e coprirebbe i pulsanti del cruscotto: ogni app dice con
+     CALCX_NASCONDI quando e' la vista del docente */
+  setInterval(function(){
+    var via = false;
+    try{ via = typeof window.CALCX_NASCONDI === 'function' && !!window.CALCX_NASCONDI(); }catch(e){}
+    btn.classList.toggle('calcx-via', via); pan.classList.toggle('calcx-via', via);
+  }, 700);
+  mostra();
+})();
+</script>
 </body>
 </html>
