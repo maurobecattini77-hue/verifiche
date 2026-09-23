@@ -2584,35 +2584,73 @@ window.CALCX_NASCONDI = function(){ try{ return sessionStorage.getItem('ver_doce
   /* ---- il motore: come una calcolatrice da tavolo ---- */
   var cur = '0', acc = null, op = null, fresco = true, errore = false, conto = '';
   var SIMBOLO = { '+':'+', '-':'−', '*':'×', '/':'÷' };
-  function tondo(x){ return Math.round(x * 1e10) / 1e10; }
-  function val(s){ return parseFloat(String(s).replace(',', '.')) || 0; }
-  function fmtNum(x){
-    if(!isFinite(x)) return 'Errore';
-    x = tondo(x);
-    var neg = x < 0; x = Math.abs(x);
-    var s = String(x);
-    if(s.indexOf('e') >= 0) s = x.toFixed(10).replace(/0+$/, '').replace(/\.$/, '');
-    var p = s.split('.');
-    var intero = p[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-    return (neg ? '−' : '') + intero + (p[1] ? ',' + p[1] : '');
+  /* I numeri sono DECIMALI ESATTI, cifra per cifra, come in una calcolatrice da tavolo: { n: intero BigInt, s: quanti
+     decimali }, cioe' n / 10^s. Niente virgola mobile del computer (quella che fa 0,1 + 0,2 = 0,30000000000000004).
+     Somma, sottrazione e moltiplicazione sono esatte; ogni risultato si arrotonda a 10 decimali, meta' lontano dallo
+     zero (le divisioni come 2 ÷ 3 non finiscono mai). Oltre 15 cifre intere: «Errore», come le calcolatrici vere. */
+  var B0 = BigInt(0), B1 = BigInt(1), B2 = BigInt(2), B10 = BigInt(10);
+  var MAXDEC = 10, MAXINT = 15;
+  function p10(k){ return BigInt('1' + new Array(k + 1).join('0')); }
+  function pulisci(x){ while(x.s > 0 && x.n % B10 === B0){ x = { n: x.n / B10, s: x.s - 1 }; } return x; }
+  function dividi(n, d, s){  // n / d arrotondato all'intero, meta' lontano dallo zero; il risultato ha s decimali
+    var neg = (n < B0) !== (d < B0);
+    if(n < B0) n = -n; if(d < B0) d = -d;
+    var q = n / d; if((n % d) * B2 >= d) q = q + B1;
+    return pulisci({ n: neg ? -q : q, s: s });
   }
+  function tondo(x){ return x.s <= MAXDEC ? pulisci(x) : dividi(x.n, p10(x.s - MAXDEC), MAXDEC); }
+  function inScala(x){  // null = fuori scala
+    var a = x.n < B0 ? -x.n : x.n;
+    return a >= p10(MAXINT + x.s) ? null : x;
+  }
+  function val(s){  // da quello che si sta scrivendo ("-1234,5") al numero esatto
+    s = String(s); var neg = s.charAt(0) === '-'; if(neg) s = s.slice(1);
+    var p = s.split(','), i = p[0] || '0', f = p[1] || '';
+    var n = BigInt(i + f);
+    return pulisci({ n: neg ? -n : n, s: f.length });
+  }
+  function testoDi(x, punti){
+    var neg = x.n < B0, t = (neg ? -x.n : x.n).toString(), i = t, f = '';
+    if(x.s > 0){ while(t.length <= x.s) t = '0' + t; i = t.slice(0, t.length - x.s); f = t.slice(t.length - x.s); }
+    if(punti) i = i.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    return (neg ? (punti ? '−' : '-') : '') + i + (f ? ',' + f : '');
+  }
+  function fmtNum(x){ return x === null ? 'Errore' : testoDi(x, true); }
   function fmtCur(s){  // quello che si sta scrivendo, coi punti delle migliaia
     var neg = s.charAt(0) === '-'; if(neg) s = s.slice(1);
     var p = s.split(',');
     return (neg ? '−' : '') + p[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.') + (p.length > 1 ? ',' + p[1] : '');
   }
-  function calcola(a, o, b){
-    if(o === '+') return a + b; if(o === '-') return a - b; if(o === '*') return a * b;
-    if(o === '/') return b === 0 ? NaN : a / b; return b;
+  function calcola(a, o, b){  // null = errore (diviso zero o fuori scala)
+    var r;
+    if(o === '+' || o === '-'){
+      var s = Math.max(a.s, b.s), x = a.n * p10(s - a.s), y = b.n * p10(s - b.s);
+      r = { n: o === '+' ? x + y : x - y, s: s };
+    } else if(o === '*'){ r = { n: a.n * b.n, s: a.s + b.s };
+    } else if(o === '/'){
+      if(b.n === B0) return null;
+      r = dividi(a.n * p10(b.s + MAXDEC), b.n * p10(a.s), MAXDEC);
+    } else { r = b; }
+    return inScala(tondo(r));
   }
-  function daNumero(x){ var s = String(tondo(x)); if(s.indexOf('e') >= 0) s = tondo(x).toFixed(10).replace(/0+$/, '').replace(/\.$/, ''); return s.replace('.', ','); }
+  function centesimi(p){ return { n: p.n, s: p.s + 2 }; }  // p % = p / 100, esatto
+  function daNumero(x){ return testoDi(x, false); }
+  /* lo schermo: il numero si rimpicciolisce da solo finche' ci sta intero, mai tagliato */
+  function adatta(el, grande, piccolo){
+    el.style.fontSize = '';
+    if(!el.clientWidth) return;
+    var f = grande;
+    while(f > piccolo && el.scrollWidth > el.clientWidth){ f -= 1; el.style.fontSize = f + 'px'; }
+  }
   function mostra(){
     elNum.textContent = errore ? 'Errore' : fmtCur(cur);
     elConto.textContent = conto;
+    adatta(elNum, 30, 12); adatta(elConto, 13, 9);
   }
+  window.addEventListener('resize', function(){ mostra(); });
   function azzera(){ cur = '0'; acc = null; op = null; fresco = true; errore = false; conto = ''; }
   function chiudiConto(ris, testo){
-    if(!isFinite(ris)){ azzera(); errore = true; conto = testo; return; }
+    if(ris === null){ azzera(); errore = true; conto = testo; return; }
     conto = testo; cur = daNumero(ris); acc = null; op = null; fresco = true;
   }
   function premi(k){
@@ -2632,23 +2670,23 @@ window.CALCX_NASCONDI = function(){ try{ return sessionStorage.getItem('ver_doce
       var o = { piu:'+', meno:'-', per:'*', diviso:'/' }[k];
       if(acc !== null && op && !fresco){
         var r = calcola(acc, op, val(cur));
-        if(!isFinite(r)){ chiudiConto(r, fmtNum(acc) + ' ' + SIMBOLO[op] + ' ' + fmtCur(cur)); mostra(); return; }
-        acc = tondo(r); cur = daNumero(acc);
+        if(r === null){ chiudiConto(r, fmtNum(acc) + ' ' + SIMBOLO[op] + ' ' + fmtCur(cur)); mostra(); return; }
+        acc = r; cur = daNumero(acc);
       } else if(acc === null || !op){ acc = val(cur); }
       op = o; fresco = true; conto = fmtNum(acc) + ' ' + SIMBOLO[op];
     } else if(k === 'uguale'){
       if(acc !== null && op){
-        var b = val(cur);
-        chiudiConto(calcola(acc, op, b), fmtNum(acc) + ' ' + SIMBOLO[op] + ' ' + fmtCur(cur) + ' =');
+        chiudiConto(calcola(acc, op, val(cur)), fmtNum(acc) + ' ' + SIMBOLO[op] + ' ' + fmtCur(cur) + ' =');
       }
     } else if(k === 'percento'){
-      var p = val(cur);
+      var p = val(cur), ris;
       if(acc !== null && op){
-        var ris = op === '+' ? acc + acc * p / 100 : op === '-' ? acc - acc * p / 100
-                : op === '*' ? acc * p / 100 : (p === 0 ? NaN : acc / (p / 100));
+        if(op === '+' || op === '-') ris = calcola(acc, op, { n: acc.n * p.n, s: acc.s + p.s + 2 });
+        else if(op === '*') ris = inScala(tondo({ n: acc.n * p.n, s: acc.s + p.s + 2 }));
+        else ris = calcola(acc, '/', centesimi(p));
         chiudiConto(ris, fmtNum(acc) + ' ' + SIMBOLO[op] + ' ' + fmtCur(cur) + ' % =');
       } else {
-        chiudiConto(p / 100, fmtCur(cur) + ' % =');
+        chiudiConto(inScala(tondo(centesimi(p))), fmtCur(cur) + ' % =');
       }
     }
     mostra();
@@ -2674,7 +2712,7 @@ window.CALCX_NASCONDI = function(){ try{ return sessionStorage.getItem('ver_doce
   });
 
   /* ---- aprire, chiudere, spostare ---- */
-  function apri(){ posiziona(); pan.classList.add('aperta'); btn.classList.add('aperta'); btn.setAttribute('aria-expanded', 'true'); try{ pan.focus({ preventScroll:true }); }catch(e){} }
+  function apri(){ posiziona(); pan.classList.add('aperta'); mostra(); btn.classList.add('aperta'); btn.setAttribute('aria-expanded', 'true'); try{ pan.focus({ preventScroll:true }); }catch(e){} }
   function chiudi(){ pan.classList.remove('aperta'); btn.classList.remove('aperta'); btn.setAttribute('aria-expanded', 'false'); }
   btn.addEventListener('click', function(){ if(pan.classList.contains('aperta')) chiudi(); else apri(); });
   pan.querySelector('.calcx-x').addEventListener('click', function(){ chiudi(); });
