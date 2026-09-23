@@ -2522,22 +2522,24 @@
       Nessuna modifica a Supabase/schema/costanti; ogni scrittura passa da onSyncUpdate/syncUpdateCloud.
     -->
 <script>
-/* colore e vista del docente per la calcolatrice di questa app */
+/* colore, barra in alto e vista del docente per la calcolatrice di questa app */
 window.CALCX_ACCENT = '#57534a';
+window.CALCX_TESTATA = '.sticky.top-0.z-30';
 window.CALCX_NASCONDI = function(){ try{ return sessionStorage.getItem('ver_docente_attivo') === '1'; }catch(e){ return false; } };
 /* CALCOLATRICE DELL'APP (23/09/2026, chiesta da Mauro). Gli alunni non hanno la calcolatrice e quella di Windows o
-   del telefono fa uscire dalla pagina, e il pallino rosso si accende. Questa sta DENTRO la pagina: l'icona e' fissa
-   in alto a destra, appena sotto l'intestazione dell'app, e resta li' anche scorrendo; la calcolatrice si apre SOLO col clic sull'icona (sul telefono non
+   del telefono fa uscire dalla pagina, e il pallino rosso si accende. Questa sta DENTRO la pagina: l'icona sta
+   DENTRO la barra in alto dell'app, a destra (la barra le fa posto con CALCX_TESTATA), e quando si scorre e la barra
+   sparisce resta fissa nell'angolo in alto a destra; la calcolatrice si apre SOLO col clic sull'icona (sul telefono non
    deve comparire da sola) e si chiude con la X o con un altro clic sull'icona. Il display non e' una casella di
    testo, cosi' sul telefono non si apre la tastiera. Tutto vive fuori dal resto dell'app (nomi calcx-*). */
 (function(){
   if(window.__calcx) return; window.__calcx = true;
   var ACC = window.CALCX_ACCENT || '#3f6b52';
   var css = ''
-   + '.calcx-btn{position:fixed;top:92px;right:14px;z-index:8000;width:46px;height:46px;border-radius:50%;background:#fff;border:1.5px solid ' + ACC + ';color:' + ACC + ';display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;box-shadow:0 2px 8px rgba(26,32,44,.14);-webkit-tap-highlight-color:transparent;}'
+   + '.calcx-btn{position:fixed;top:10px;right:12px;z-index:8000;width:44px;height:44px;border-radius:50%;background:#fff;border:1.5px solid ' + ACC + ';color:' + ACC + ';display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;box-shadow:0 2px 8px rgba(26,32,44,.14);-webkit-tap-highlight-color:transparent;}'
    + '.calcx-btn svg{width:23px;height:23px;display:block;}'
    + '.calcx-btn.aperta{background:' + ACC + ';color:#fff;}'
-   + '.calcx-pan{position:fixed;top:148px;right:14px;z-index:8001;width:292px;background:#fff;border:1px solid #d9dee5;border-radius:16px;box-shadow:0 10px 30px rgba(26,32,44,.18);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#1a202c;display:none;user-select:none;-webkit-user-select:none;touch-action:manipulation;}'
+   + '.calcx-pan{position:fixed;top:64px;right:12px;z-index:8001;width:292px;background:#fff;border:1px solid #d9dee5;border-radius:16px;box-shadow:0 10px 30px rgba(26,32,44,.18);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#1a202c;display:none;user-select:none;-webkit-user-select:none;touch-action:manipulation;}'
    + '.calcx-pan.aperta{display:block;}.calcx-pan:focus{outline:none;}'
    + '.calcx-testa{display:flex;align-items:center;justify-content:space-between;padding:10px 10px 6px 16px;cursor:move;touch-action:none;}'
    + '.calcx-titolo{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#6b7280;}'
@@ -2552,8 +2554,9 @@ window.CALCX_NASCONDI = function(){ try{ return sessionStorage.getItem('ver_doce
    + '.calcx-tasti button.op{background:#f2f5f8;color:' + ACC + ';}'
    + '.calcx-tasti button.fn{background:#f2f5f8;color:#4a5568;font-size:16px;}'
    + '.calcx-tasti button.ug{background:' + ACC + ';border-color:' + ACC + ';color:#fff;}'
-   + '@media (max-width:600px){.calcx-btn{top:76px;right:10px;}.calcx-pan{right:10px;top:130px;width:calc(100vw - 20px);max-width:320px;}.calcx-tasti button{height:52px;font-size:21px;}}'
+   + '@media (max-width:600px){.calcx-btn{right:8px;}.calcx-pan{right:10px;width:calc(100vw - 20px);max-width:320px;}.calcx-tasti button{height:52px;font-size:21px;}}'
    + '.calcx-via{display:none !important;}'
+   + (window.CALCX_TESTATA ? 'html.calcx-on ' + window.CALCX_TESTATA + '{padding-right:60px !important;box-sizing:border-box;}' : '')
    + '@media print{.calcx-btn,.calcx-pan{display:none !important;}}';
   var st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
 
@@ -2671,7 +2674,7 @@ window.CALCX_NASCONDI = function(){ try{ return sessionStorage.getItem('ver_doce
   });
 
   /* ---- aprire, chiudere, spostare ---- */
-  function apri(){ pan.classList.add('aperta'); btn.classList.add('aperta'); btn.setAttribute('aria-expanded', 'true'); try{ pan.focus({ preventScroll:true }); }catch(e){} }
+  function apri(){ posiziona(); pan.classList.add('aperta'); btn.classList.add('aperta'); btn.setAttribute('aria-expanded', 'true'); try{ pan.focus({ preventScroll:true }); }catch(e){} }
   function chiudi(){ pan.classList.remove('aperta'); btn.classList.remove('aperta'); btn.setAttribute('aria-expanded', 'false'); }
   btn.addEventListener('click', function(){ if(pan.classList.contains('aperta')) chiudi(); else apri(); });
   pan.querySelector('.calcx-x').addEventListener('click', function(){ chiudi(); });
@@ -2695,7 +2698,7 @@ window.CALCX_NASCONDI = function(){ try{ return sessionStorage.getItem('ver_doce
   window.addEventListener('resize', function(){
     if(!pan.style.left) return;
     var x = parseFloat(pan.style.left), y = parseFloat(pan.style.top), w = pan.offsetWidth;
-    if(x + w > window.innerWidth - 4 || y > window.innerHeight - 60){ pan.style.left = ''; pan.style.top = ''; pan.style.right = ''; }
+    if(x + w > window.innerWidth - 4 || y > window.innerHeight - 60){ pan.style.left = ''; pan.style.top = ''; pan.style.right = ''; posiziona(); }
   });
   /* nella dashboard del docente l'icona non serve e coprirebbe i pulsanti del cruscotto: ogni app dice con
      CALCX_NASCONDI quando e' la vista del docente */
@@ -2703,7 +2706,22 @@ window.CALCX_NASCONDI = function(){ try{ return sessionStorage.getItem('ver_doce
     var via = false;
     try{ via = typeof window.CALCX_NASCONDI === 'function' && !!window.CALCX_NASCONDI(); }catch(e){}
     btn.classList.toggle('calcx-via', via); pan.classList.toggle('calcx-via', via);
+    document.documentElement.classList.toggle('calcx-on', !via);
+    posiziona();
   }, 700);
+  /* l'icona sta a meta' altezza della barra in alto finche' la barra si vede; poi nell'angolo */
+  function posiziona(){
+    var top = 10;
+    try{
+      var H = window.CALCX_TESTATA ? document.querySelector(window.CALCX_TESTATA) : null;
+      if(H && H.offsetParent !== null){ var r = H.getBoundingClientRect(); if(r.height >= 40) top = Math.max(8, r.top + (r.height - 44) / 2); }
+    }catch(e){}
+    btn.style.top = Math.round(top) + 'px';
+    if(!pan.style.left) pan.style.top = Math.round(top + 54) + 'px';
+  }
+  window.addEventListener('scroll', posiziona, { passive:true });
+  window.addEventListener('resize', posiziona);
+  document.documentElement.classList.add('calcx-on');
   mostra();
 })();
 </script>
