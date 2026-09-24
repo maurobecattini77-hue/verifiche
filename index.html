@@ -2342,8 +2342,15 @@
                    la sua rispetto allo schermo del dispositivo (gia' senza la barra delle applicazioni): sotto il 90% della
                    larghezza o l'85% dell'altezza e' «fuori» (finestra non ingrandita, schermo diviso, finestra mobile del
                    telefono). Sui telefoni l'altezza non conta mentre si scrive in una casella: la tastiera la accorcia. */
+                /* IPHONE: CONTA SOLO LA PAGINA NASCOSTA (24/09/2026). In 4G tre alunni con l'iPhone avevano il pallino
+                   acceso fisso pur rispondendo (risposte e battito ogni 5 s arrivavano): su certi iPhone, col link aperto
+                   da Classroom, la pagina risulta senza fuoco o piu' bassa dello schermo anche quando e' davanti.
+                   Sull'iPhone due app insieme non si tengono: se l'alunno va altrove la pagina diventa NASCOSTA, sempre.
+                   Quindi li' «fuori» = pagina nascosta. iPad (schermo diviso) e Android: tutti i controlli. */
+                const iPhoneSoloSchermo = () => { try { return /iPhone|iPod/.test(navigator.userAgent || ''); } catch (e) { return false; } };
                 const finestraRistretta = () => {
                     try {
+                        if (iPhoneSoloSchermo()) return false;
                         let sw = screen.availWidth || screen.width, sh = screen.availHeight || screen.height;
                         const fw = window.outerWidth || window.innerWidth, fh = window.outerHeight || window.innerHeight;
                         if (!sw || !sh || !fw || !fh) return false;
@@ -2358,7 +2365,7 @@
                         return fh < sh * 0.85;
                     } catch (e) { return false; }
                 };
-                const fuoriAdesso = () => document.visibilityState === 'hidden' || (!document.hasFocus() && !suUnCampo()) || finestraRistretta();
+                const fuoriAdesso = () => iPhoneSoloSchermo() ? document.visibilityState === 'hidden' : (document.visibilityState === 'hidden' || (!document.hasFocus() && !suUnCampo()) || finestraRistretta());
                 // Un dispositivo che manda la pagina dietro puo' congelarla o ucciderla senza preavviso: cio' che non e'
                 // ancora confermato parte subito con l'invio che il browser spedisce comunque (keepalive).
                 const salvaResto = () => {
@@ -2367,7 +2374,7 @@
                     try { if (Object.keys(resto).length) porta('ver_rispondi', { ...chiaviSessione(), p_risposte: resto }, true).catch(() => {}); } catch (e) { }
                 };
                 const stato = () => { if (document.visibilityState === 'hidden') salvaResto(); batti(fuoriAdesso(), true); };
-                const via = () => { if (document.visibilityState !== 'hidden' && suUnCampo()) return; batti(true, true); };
+                const via = () => { if (document.visibilityState !== 'hidden' && (suUnCampo() || iPhoneSoloSchermo())) return; batti(true, true); };
                 const riapre = () => { salutatoRef.current = false; stato(); };
                 const chiude = (e) => {
                     if (e && e.persisted) { via(); return; }        // pagina solo messa da parte: vale come uscita
