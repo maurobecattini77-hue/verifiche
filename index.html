@@ -2472,6 +2472,75 @@
                 })();
             }, []);
 
+            /* AGGIORNAMENTO AUTOMATICO DELLE PAGINE VECCHIE (25/09/2026, chiesto da Mauro, come in Cedolino e Fattura
+               Facile). Un telefono riprende la scheda com'era, senza ricaricarla: un alunno puo' lavorare con una versione
+               di giorni prima. La pagina chiede al sito quale versione e' pubblicata (versione.txt, da aggiornare INSIEME
+               a VERSIONE_APP a ogni pubblicazione) all'avvio, quando torna in primo piano e ogni 5 minuti; se ce n'e' una
+               piu' nuova si ricarica da sola, ma SOLO quando e' sicuro: schermata del PIN o prova aperta, senza che
+               l'alunno abbia toccato niente nell'ultimo minuto, e dopo che le risposte in viaggio sono arrivate (quelle
+               che non fanno in tempo restano nella copia del dispositivo e ripartono dopo il ricarico, stesso gettone).
+               Il ricarico e' un F5: l'alunno torna sulla sua prova. Mai al docente, mai su «Accesso bloccato» o
+               «Sessione chiusa». Al massimo una volta ogni 10 minuti. */
+            const VERSIONE_APP = '20260925-01';
+            const loadingRef = useRef(true);
+            useEffect(() => { loadingRef.current = loading; }, [loading]);
+            useEffect(() => {
+                let ultimo = 0, inCorso = false, ultimoTocco = 0, riprova = null;
+                const tocco = (e) => { if (e && e.isTrusted) ultimoTocco = Date.now(); };
+                const momentoSicuro = () => {
+                    if (loadingRef.current) return false;
+                    const v = viewRef.current;
+                    if (v !== 'landing' && v !== 'student') return false;          // docente, accesso bloccato, sessione chiusa
+                    return !(ultimoTocco > Date.now() - 60000);                   // sta scrivendo (anche il PIN): si aspetta
+                };
+                const ricarica = () => {
+                    if (inCorso) return; inCorso = true;
+                    try { sessionStorage.setItem('ver_aggiornata', String(Date.now())); } catch (e) { }
+                    try { scriviLocale(); } catch (e) { }
+                    const t0 = Date.now();
+                    const aspetta = () => {
+                        const resto = Object.keys(pendRef.current || {}).length + Object.keys(inVoloRef.current || {}).length;
+                        if (resto && Date.now() - t0 < 6000) { setTimeout(aspetta, 250); return; }
+                        try { scriviLocale(); } catch (e) { }
+                        setTimeout(() => { location.reload(); }, 300);
+                    };
+                    aspetta();
+                };
+                const controlla = () => {
+                    if (inCorso || Date.now() - ultimo < 20000) return;
+                    ultimo = Date.now();
+                    try { if (Date.now() - Number(sessionStorage.getItem('ver_aggiornata') || 0) < 600000) return; } catch (e) { }
+                    fetch('versione.txt?t=' + Date.now(), { cache: 'no-store' })
+                        .then(r => (r && r.ok) ? r.text() : '')
+                        .then(t => {
+                            t = String(t || '').trim();
+                            if (!/^\d{8}-\d{2}$/.test(t) || t <= VERSIONE_APP) return;
+                            if (momentoSicuro()) { ricarica(); return; }
+                            // non e' il momento: riprovo fra poco
+                            if (riprova) clearTimeout(riprova);
+                            riprova = setTimeout(() => { ultimo = 0; controlla(); }, 30000);
+                        })
+                        .catch(() => { });
+                };
+                const visibile = () => { if (document.visibilityState !== 'hidden') controlla(); };
+                const ripresa = (e) => { if (e && e.persisted) controlla(); };
+                document.addEventListener('input', tocco, true);
+                document.addEventListener('keydown', tocco, true);
+                document.addEventListener('click', tocco, true);
+                document.addEventListener('visibilitychange', visibile);
+                window.addEventListener('pageshow', ripresa);
+                const giro = setInterval(visibile, 5 * 60 * 1000);
+                const primo = setTimeout(controlla, 4000);
+                return () => {
+                    document.removeEventListener('input', tocco, true);
+                    document.removeEventListener('keydown', tocco, true);
+                    document.removeEventListener('click', tocco, true);
+                    document.removeEventListener('visibilitychange', visibile);
+                    window.removeEventListener('pageshow', ripresa);
+                    clearInterval(giro); clearTimeout(primo); if (riprova) clearTimeout(riprova);
+                };
+            }, []);
+
             if (loading) {
                 return (
                     <div className="flex-grow flex items-center justify-center bg-[#eef0ea]">
