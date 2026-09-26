@@ -2347,7 +2347,18 @@
                    da Classroom, la pagina risulta senza fuoco o piu' bassa dello schermo anche quando e' davanti.
                    Sull'iPhone due app insieme non si tengono: se l'alunno va altrove la pagina diventa NASCOSTA, sempre.
                    Quindi li' «fuori» = pagina nascosta. iPad (schermo diviso) e Android: tutti i controlli. */
-                const iPhoneSoloSchermo = () => { try { return /iPhone|iPod/.test(navigator.userAgent || ''); } catch (e) { return false; } };
+                /* 26/09/2026: anche l'iPhone con «Richiedi sito web desktop». Li' Safari si presenta come un Mac
+                   («Macintosh», come l'iPad), ma resta uno schermo a tocco e piccolo: il Mac vero non ha il tocco
+                   (maxTouchPoints 0), l'iPad piu' piccolo ha il lato corto di 744 px, ogni iPhone al massimo 440. */
+                const iPhoneSoloSchermo = () => {
+                    try {
+                        const ua = navigator.userAgent || '';
+                        if (/iPhone|iPod/.test(ua)) return true;
+                        if (!/Macintosh/.test(ua) || !(navigator.maxTouchPoints > 1)) return false;
+                        const lato = Math.min(screen.width || 0, screen.height || 0);
+                        return lato > 0 && lato < 600;
+                    } catch (e) { return false; }
+                };
                 const finestraRistretta = () => {
                     try {
                         if (iPhoneSoloSchermo()) return false;
@@ -2481,7 +2492,7 @@
                che non fanno in tempo restano nella copia del dispositivo e ripartono dopo il ricarico, stesso gettone).
                Il ricarico e' un F5: l'alunno torna sulla sua prova. Mai al docente, mai su «Accesso bloccato» o
                «Sessione chiusa». Al massimo una volta ogni 10 minuti. */
-            const VERSIONE_APP = '20260925-01';
+            const VERSIONE_APP = '20260926-01';
             const loadingRef = useRef(true);
             useEffect(() => { loadingRef.current = loading; }, [loading]);
             useEffect(() => {
