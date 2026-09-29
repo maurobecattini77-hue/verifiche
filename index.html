@@ -418,8 +418,18 @@
             graded: s.graded != null ? s.graded : false,
             startedAt: s.startedAt != null ? s.startedAt : null,
             submittedAt: s.submittedAt != null ? s.submittedAt : null,
-            resumeAllowed: s.resumeAllowed != null ? s.resumeAllowed : false
+            resumeAllowed: s.resumeAllowed != null ? s.resumeAllowed : false,
+            ...(s.prova ? { prova: String(s.prova) } : {})
         });
+
+        /* IL QUIZ DI UN ALUNNO (29/09/2026, chiesto da Mauro: «come in Cedolino, una verifica a ognuno»). Clic sul nome nel
+           cruscotto -> elenco dei quiz. Il quiz scelto sta nella classe, in «prove» (id -> { nome, examTitle, questions }),
+           e l'alunno lo richiama con «prova»; senza, fa quello della classe. Il cloud fa lo stesso (ver__domande_di). */
+        const provaDi = (classData, s) => {
+            const p = (s && s.prova && classData && classData.prove) ? classData.prove[s.prova] : null;
+            return (p && Array.isArray(p.questions)) ? p : null;
+        };
+        const domandeDi = (classData, s) => { const p = provaDi(classData, s); return p ? p.questions : ((classData && classData.questions) || []); };
 
         /* =====================================================================
            ICONE
@@ -1074,7 +1084,9 @@
             );
         };
 
-        const SceltaQuiz = ({ cls, onScegli, onChiudi }) => {
+        // perChi (29/09/2026): la stessa finestra per il quiz di UN alunno; quizSuo = il nome del quiz personale che ha adesso
+        // (null = fa quello della classe), onClasse = rimettergli il quiz della classe.
+        const SceltaQuiz = ({ cls, onScegli, onChiudi, perChi, quizSuo, onClasse }) => {
             const [elenco, setElenco] = useState(null);           // null = sto leggendo; 'errore'; oppure l'elenco
             const [annoAperto, setAnnoAperto] = useState(null);
             const [moduloAperto, setModuloAperto] = useState(null);
@@ -1109,7 +1121,7 @@
             const scegli = async (voce, prova) => {
                 if (attesa) return;
                 setAttesa(voce.id); setErrore('');
-                try { const p = prova || await leggiProva(voce); setAttesa(null); onScegli(p); }
+                try { const p = prova || await leggiProva(voce); setAttesa(null); onScegli(p, voce); }
                 catch (e) { setErrore('Il collegamento non risponde: riprova.'); setAttesa(null); }
             };
 
@@ -1130,10 +1142,16 @@
                     <div className="flex items-start justify-between gap-3 mb-4">
                         <div>
                             <div className="text-xs font-bold text-gray-400 uppercase tracking-widest">Classe {cls}</div>
-                            <h3 className="text-xl font-extrabold text-[#57534a]">{anteprima ? 'Anteprima' : 'Scegli quiz'}</h3>
+                            <h3 className="text-xl font-extrabold text-[#57534a]">{anteprima ? 'Anteprima' : (perChi ? 'Quiz per ' + perChi : 'Scegli quiz')}</h3>
                         </div>
                         <button onClick={onChiudi} className="text-gray-400 hover:text-[#57534a]"><Icon name="x" size={22}/></button>
                     </div>
+                    {perChi && !anteprima && (
+                        <div className="mb-4 bg-gray-50 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
+                            <div className="text-sm text-[#827f75] min-w-0">Adesso fa {quizSuo ? <b className="text-[#4a3d63]">{quizSuo}</b> : <b className="text-[#57534a]">il quiz della classe</b>}</div>
+                            {quizSuo && <button onClick={onClasse} className="bg-white border-2 border-[#57534a] text-[#57534a] rounded-lg px-3 py-1.5 font-bold text-xs hover:bg-gray-50 flex-shrink-0">Rimetti il quiz della classe</button>}
+                        </div>
+                    )}
                     {errore && <div className="mb-3 text-sm font-semibold text-[#b4472f]">{errore}</div>}
 
                     {anteprima ? (
@@ -1214,6 +1232,8 @@
             const [forceAllOpen, setForceAllOpen] = useState(false);
             const [undoAllOpen, setUndoAllOpen] = useState(false);
             const [sceltaOpen, setSceltaOpen] = useState(false);   // finestra «Scegli quiz»
+            const [quizPin, setQuizPin] = useState(null);          // alunno di cui si sceglie il quiz (clic sul nome)
+            const [quizNuovo, setQuizNuovo] = useState(null);      // { pin, personale } in attesa del «Sì, procedi» (alunno gia' partito)
 
             const classInputRef = useRef(null);
             const backupInputRef = useRef(null);
@@ -1304,9 +1324,18 @@
                 // rientrando col PIN vedrebbe le soluzioni della verifica nuova senza averla fatta. Quindi si chiede
                 // conferma e, col si', si scarica il backup, si rimettono tutti a zero e si abbina la verifica nuova.
                 if (Object.values(classData.students || {}).some(s => s && s.status && s.status !== 'idle')) { setProvaNuova({ domande, titolo }); return; }
-                const updatedClasses = { ...db.classes, [cls]: { ...classData, questions: domande, examTitle: titolo } };
+                // (29/09/2026) Come «Assegna a tutta la classe» in Cedolino: il quiz della classe vale per TUTTI, i quiz
+                // personali scelti prima si tolgono (si rimettono col clic sul nome).
+                const studenti = {}; let personali = 0;
+                Object.keys(classData.students || {}).forEach(p => {
+                    const s = classData.students[p];
+                    if (s && s.prova) { const c = { ...s }; delete c.prova; studenti[p] = c; personali++; } else studenti[p] = s;
+                });
+                const nuovaClasse = { ...classData, students: studenti, questions: domande, examTitle: titolo };
+                delete nuovaClasse.prove;
+                const updatedClasses = { ...db.classes, [cls]: nuovaClasse };
                 onSyncUpdate(null, null, null, updatedClasses);
-                alert(`Quiz abbinato alla classe ${cls} (${domande.length} domande${titolo ? ' · ' + titolo : ''}).`);
+                alert(`Quiz abbinato alla classe ${cls} (${domande.length} domande${titolo ? ' · ' + titolo : ''}).` + (personali ? ` ${personali === 1 ? 'Il quiz personale di 1 alunno è stato tolto' : 'I quiz personali di ' + personali + ' alunni sono stati tolti'}: ora fanno tutti questo.` : ''));
             };
 
             // VERIFICA NUOVA su una classe che ne ha gia' svolta una: backup, alunni a zero (stessi PIN), verifica abbinata.
@@ -1323,18 +1352,58 @@
                         openComment: '', closedScore: null, graded: false, startedAt: null, submittedAt: null
                     };
                 });
-                const updatedClasses = { ...db.classes, [cls]: { ...classData, published: false, students: azzerati, questions: provaNuova.domande, examTitle: provaNuova.titolo } };
+                const nuovaClasse = { ...classData, published: false, students: azzerati, questions: provaNuova.domande, examTitle: provaNuova.titolo };
+                delete nuovaClasse.prove;   // (29/09/2026) i quiz personali se ne vanno con la verifica di prima
+                const updatedClasses = { ...db.classes, [cls]: nuovaClasse };
                 onSyncUpdate(null, null, null, updatedClasses);
                 alert(`Verifica abbinata alla classe ${cls} (${provaNuova.domande.length} domande${provaNuova.titolo ? ' · ' + provaNuova.titolo : ''}). Backup scaricato, alunni rimessi a zero.`);
                 setProvaNuova(null);
             };
 
+            // QUIZ DI UN ALUNNO (29/09/2026, chiesto da Mauro). prova = quiz scelto dall'elenco, oppure null = «Rimetti il quiz
+            // della classe». Se il quiz scelto e' proprio quello della classe, vale come «Rimetti». Chi ha gia' iniziato o
+            // consegnato torna a zero, con conferma e backup, per la stessa ragione della classe: le risposte sono salvate
+            // per numero di domanda e verrebbero corrette contro le domande nuove.
+            const scegliQuizAlunno = (prova, voce) => {
+                const pin = quizPin; setQuizPin(null);
+                const s = classData && classData.students[pin];
+                if (!s) return;
+                const personale = (prova && voce && !ugualiJson(prova.domande, classData.questions || [])) ? { id: voce.id, nome: voce.titolo, examTitle: prova.titolo ? String(prova.titolo) : '', questions: prova.domande } : null;
+                const ora = provaDi(classData, s);
+                if (personale ? (ora && ugualiJson(ora.questions, personale.questions)) : !ora) { alert(nomeBreve(s.lastName, s.firstName) + (personale ? ' fa già questo quiz.' : ' fa già il quiz della classe.')); return; }
+                if (s.status && s.status !== 'idle') { setQuizNuovo({ pin, personale }); return; }
+                applicaQuizAlunno(pin, personale);
+            };
+            const applicaQuizAlunno = (pin, personale) => {
+                const s = classData && classData.students[pin];
+                if (!s) return;
+                const nuovo = {                // la scheda si RICREA a zero, come fa confermaProvaNuova (mai ritoccare quella di db.classes)
+                    pin: String(s.pin), firstName: s.firstName, lastName: s.lastName,
+                    status: 'idle', answers: {}, openAnswer: '', openScore: null,
+                    openComment: '', closedScore: null, graded: false, startedAt: null, submittedAt: null
+                };
+                const prove = { ...(classData.prove || {}) };
+                if (personale) { nuovo.prova = personale.id; prove[personale.id] = { nome: personale.nome, examTitle: personale.examTitle, questions: personale.questions }; }
+                const studenti = { ...classData.students, [pin]: nuovo };
+                Object.keys(prove).forEach(id => { if (!Object.values(studenti).some(x => x && x.prova === id)) delete prove[id]; });   // via i quiz che non fa piu' nessuno
+                const nuovaClasse = { ...classData, students: studenti };
+                if (Object.keys(prove).length) nuovaClasse.prove = prove; else delete nuovaClasse.prove;
+                onSyncUpdate(null, null, null, { ...db.classes, [cls]: nuovaClasse });
+            };
+            const confermaQuizNuovo = () => {
+                if (!quizNuovo || !classData || !classData.students[quizNuovo.pin]) { setQuizNuovo(null); return; }
+                exportBackup();                // il lavoro di prima non si perde
+                applicaQuizAlunno(quizNuovo.pin, quizNuovo.personale);
+                setQuizNuovo(null);
+            };
+
             const sblocca = (pin) => {
                 const cur = classData.students[pin];
                 const st = { ...cur, status: 'playing', resumeAllowed: true };
-                if (!st.optionOrder || Object.keys(st.optionOrder).length === 0) st.optionOrder = buildOptionOrder(questions);
-                if (!st.matchOrder || Object.keys(st.matchOrder).length === 0) st.matchOrder = buildMatchOrder(questions);
-                if (!Array.isArray(st.questionOrder) || !st.questionOrder.length) st.questionOrder = buildQuestionOrder(questions);
+                const suo = domandeDi(classData, cur);   // il SUO quiz (personale o della classe)
+                if (!st.optionOrder || Object.keys(st.optionOrder).length === 0) st.optionOrder = buildOptionOrder(suo);
+                if (!st.matchOrder || Object.keys(st.matchOrder).length === 0) st.matchOrder = buildMatchOrder(suo);
+                if (!Array.isArray(st.questionOrder) || !st.questionOrder.length) st.questionOrder = buildQuestionOrder(suo);
                 if (!st.openGrades) st.openGrades = {};
                 if (!st.startedAt) st.startedAt = Date.now();
                 onSyncUpdate(cls, pin, st);
@@ -1348,7 +1417,7 @@
                 const st = { ...cur };
                 st.status = esercitazione ? 'published' : 'submitted';
                 st.submittedAt = Date.now();
-                st.closedScore = computeClosedScore(st, questions);
+                st.closedScore = computeClosedScore(st, domandeDi(classData, st));
                 st.forced = true;   // consegna forzata: marchio per poterla annullare
                 onSyncUpdate(cls, pin, st);
             };
@@ -1362,7 +1431,7 @@
                         const st = { ...updatedStudents[p] };
                         st.status = esercitazione ? 'published' : 'submitted';
                         st.submittedAt = Date.now();
-                        st.closedScore = computeClosedScore(st, questions);
+                        st.closedScore = computeClosedScore(st, domandeDi(classData, st));
                         st.forced = true;   // consegna forzata: marchio per poterla annullare
                         updatedStudents[p] = st;
                     }
@@ -1412,8 +1481,8 @@
 
             const saveGrade = (pin, grades) => {
                 const st = { ...classData.students[pin], openGrades: grades };
-                st.graded = allOpenGraded(st, questions);
-                st.closedScore = computeClosedScore(st, questions);
+                st.graded = allOpenGraded(st, domandeDi(classData, st));
+                st.closedScore = computeClosedScore(st, domandeDi(classData, st));
                 onSyncUpdate(cls, pin, st);
                 setGrading(null);
             };
@@ -1440,7 +1509,7 @@
                         // erano lo stesso oggetto, la differenza risultava vuota e al cloud arrivava solo «classe pubblicata».
                         // L'alunno restava su «Verifica consegnata» senza vedere i risultati.
                         const st = { ...updatedStudents[p] };
-                        if (st.closedScore == null) st.closedScore = computeClosedScore(st, questions);
+                        if (st.closedScore == null) st.closedScore = computeClosedScore(st, domandeDi(classData, st));
                         st.status = 'published';
                         updatedStudents[p] = st;
                     }
@@ -1456,7 +1525,7 @@
                 if (!classData) { alert("Seleziona prima una classe."); return; }
                 const svolta = Object.values(classData.students).filter(s => s.status === 'submitted' || s.status === 'published');
                 if (svolta.length === 0) { alert("Nessun alunno ha ancora svolto la verifica in questa classe: non c'e' niente da archiviare."); return; }
-                if (questions.length === 0) { alert("Nessuna verifica caricata: impossibile generare l'archivio."); return; }
+                if (svolta.every(s => domandeDi(classData, s).length === 0)) { alert("Nessuna verifica caricata: impossibile generare l'archivio."); return; }
                 const html = buildArchiveHTML(cls, classData, questions, maxClosed, maxOpen, maxTotal);
                 downloadFile(html, 'archivio_' + cls + '_' + oggiISO() + '.html', 'text/html');
             };
@@ -1470,7 +1539,8 @@
                     classe: cls,
                     dati: { published: !!classData.published, esercitazione: !!classData.esercitazione, students: classData.students },
                     quesiti: questions,
-                    examTitle: examTitle
+                    examTitle: examTitle,
+                    prove: classData.prove || {}   // (29/09/2026) i quiz personali di qualche alunno
                 };
                 downloadFile(JSON.stringify(payload, null, 2), 'backup_' + cls + '_' + oggiISO() + '.json', 'application/json');
             };
@@ -1498,7 +1568,9 @@
                             Object.values(parsed.dati.students).forEach(s => { studentsNorm[String(s.pin)] = normalizzaStudente(s); });
                             const quesitiClasse = (Array.isArray(parsed.quesiti) && parsed.quesiti.length) ? parsed.quesiti : ((db.classes[parsed.classe] && db.classes[parsed.classe].questions) || []);
                             const titoloClasse = parsed.examTitle || ((db.classes[parsed.classe] && db.classes[parsed.classe].examTitle) || '');
-                            const updatedClasses = { ...db.classes, [parsed.classe]: { published: !!parsed.dati.published, esercitazione: false, students: studentsNorm, questions: quesitiClasse, examTitle: titoloClasse } };
+                            const classeRipristinata = { published: !!parsed.dati.published, esercitazione: false, students: studentsNorm, questions: quesitiClasse, examTitle: titoloClasse };
+                            if (parsed.prove && typeof parsed.prove === 'object' && Object.keys(parsed.prove).length) classeRipristinata.prove = parsed.prove;   // (29/09/2026) i quiz personali
+                            const updatedClasses = { ...db.classes, [parsed.classe]: classeRipristinata };
                             onSyncUpdate(null, null, null, updatedClasses);
                             setCls(parsed.classe);
                             alert("Backup della classe " + parsed.classe + " ripristinato" + ((Array.isArray(parsed.quesiti) && parsed.quesiti.length) ? " (insieme alla verifica abbinata)." : "."));
@@ -1509,6 +1581,7 @@
                                 const studentsNorm = {};
                                 Object.values(parsed.classes[c].students || {}).forEach(s => { studentsNorm[String(s.pin)] = normalizzaStudente(s); });
                                 restored[c] = { published: !!parsed.classes[c].published, esercitazione: false, students: studentsNorm, questions: (parsed.classes[c].questions || (Array.isArray(parsed.questions) ? parsed.questions : [])), examTitle: (parsed.classes[c].examTitle || '') };
+                                if (parsed.classes[c].prove && typeof parsed.classes[c].prove === 'object' && Object.keys(parsed.classes[c].prove).length) restored[c].prove = parsed.classes[c].prove;   // (29/09/2026) i quiz personali
                             });
                             onSyncUpdate(null, null, null, restored);
                             const primo = Object.keys(restored)[0];
@@ -1537,7 +1610,9 @@
                         openComment: '', closedScore: null, graded: false, startedAt: null, submittedAt: null
                     };
                 });
-                const updatedClasses = { ...db.classes, [cls]: { ...classData, published: false, esercitazione: false, students: azzerati, questions: [], examTitle: '' } };
+                const nuovaClasse = { ...classData, published: false, esercitazione: false, students: azzerati, questions: [], examTitle: '' };
+                delete nuovaClasse.prove;      // (29/09/2026) via anche i quiz personali
+                const updatedClasses = { ...db.classes, [cls]: nuovaClasse };
                 onSyncUpdate(null, null, null, updatedClasses);
                 setResetOpen(false);
                 setResetText("");
@@ -1647,19 +1722,20 @@
                                                     const submitted = s.status === 'submitted' || s.status === 'published';
                                                     const playing = s.status === 'playing';
                                                     const locked = s.status === 'locked';
-                                                    const answeredCount = questions.filter(q => isAnswered(q, s)).length;
-                                                    const bd = computeBreakdown(s, questions);
+                                                    const suo = domandeDi(classData, s), pp = provaDi(classData, s);   // il SUO quiz
+                                                    const answeredCount = suo.filter(q => isAnswered(q, s)).length;
+                                                    const bd = computeBreakdown(s, suo);
                                                     const hasOpen = bd.openMax > 0;
                                                     const tot = submitted ? bd.total : null;
                                                     const canView = submitted || (playing && !scollegati[String(s.pin)]);   // «Non collegato»: riga nuda, nessun pulsante
                                                     return (
                                                         <tr key={s.pin} className="border-t border-gray-100 hover:bg-gray-50/60">
                                                             <td className="px-4 py-3 font-mono font-bold text-[#57534a]">{s.pin}</td>
-                                                            <td className="px-4 py-3 font-semibold text-[#262420] whitespace-nowrap">{nomeBreve(s.lastName, s.firstName)}{playing && rossi[String(s.pin)] && !scollegati[String(s.pin)] && <span className="dot-fuori" title="Ha abbassato o lasciato la pagina della prova"></span>}</td>
+                                                            <td onClick={() => setQuizPin(s.pin)} title="Clicca per scegliere il quiz di questo alunno" className="px-4 py-3 font-semibold text-[#262420] whitespace-nowrap cursor-pointer hover:text-[#4a3d63]">{nomeBreve(s.lastName, s.firstName)}{playing && rossi[String(s.pin)] && !scollegati[String(s.pin)] && <span className="dot-fuori" title="Ha abbassato o lasciato la pagina della prova"></span>}{pp && <div title={'Quiz suo: ' + (pp.nome || pp.examTitle)} className="text-[11px] font-semibold text-[#4a3d63] max-w-[10rem] truncate">{pp.nome || pp.examTitle}</div>}</td>
                                                             <td className="px-4 py-3">
                                                                 <div className="flex items-center gap-2">
                                                                     <StatusBadge status={playing && scollegati[String(s.pin)] ? 'offline' : s.status}/>
-                                                                    {playing && !scollegati[String(s.pin)] && <span title="Risposte date finora" className="text-xs font-bold text-[#57534a]">{answeredCount}/{questions.length}</span>}
+                                                                    {playing && !scollegati[String(s.pin)] && <span title="Risposte date finora" className="text-xs font-bold text-[#57534a]">{answeredCount}/{suo.length}</span>}
                                                                 </div>
                                                             </td>
                                                             <td className="px-4 py-3 text-center font-semibold text-[#57534a]">{submitted ? `${fmtN(bd.closedScore)}/${fmtN(bd.closedMax)}` : '—'}</td>
@@ -1690,14 +1766,14 @@
 
                     {gradingStudent && (
                         <Modal onClose={() => setGrading(null)} maxW="max-w-3xl">
-                            <GradingForm student={gradingStudent} questions={questions} onSave={saveGrade} onClose={() => setGrading(null)} />
+                            <GradingForm student={gradingStudent} questions={domandeDi(classData, gradingStudent)} onSave={saveGrade} onClose={() => setGrading(null)} />
                         </Modal>
                     )}
 
                     {viewPin && classData?.students[viewPin] && (
                         <Modal onClose={() => setViewPin(null)} maxW="max-w-2xl">
                             <div className="flex justify-end -mt-2 -mr-2 mb-1"><button onClick={() => setViewPin(null)} className="text-gray-400 hover:text-[#57534a]"><Icon name="x" size={22}/></button></div>
-                            <ReviewExam student={classData.students[viewPin]} cls={cls} reveal={classData.students[viewPin].status === 'submitted' || classData.students[viewPin].status === 'published'} questions={questions} maxClosed={maxClosed} maxOpen={maxOpen} maxTotal={maxTotal} />
+                            <ReviewExam student={classData.students[viewPin]} cls={cls} reveal={classData.students[viewPin].status === 'submitted' || classData.students[viewPin].status === 'published'} questions={domandeDi(classData, classData.students[viewPin])} maxClosed={maxClosed} maxOpen={maxOpen} maxTotal={maxTotal} />
                         </Modal>
                     )}
 
@@ -1783,6 +1859,29 @@
                     )}
 
                     {sceltaOpen && <SceltaQuiz cls={cls} onScegli={abbinaProva} onChiudi={() => setSceltaOpen(false)} />}
+
+                    {quizPin && classData?.students[quizPin] && (() => {
+                        const s = classData.students[quizPin], pp = provaDi(classData, s);
+                        return <SceltaQuiz cls={cls} perChi={nomeBreve(s.lastName, s.firstName)} quizSuo={pp ? (pp.nome || pp.examTitle || 'un quiz suo') : null}
+                                           onScegli={scegliQuizAlunno} onClasse={() => scegliQuizAlunno(null, null)} onChiudi={() => setQuizPin(null)} />;
+                    })()}
+
+                    {quizNuovo && classData?.students[quizNuovo.pin] && (() => {
+                        const s = classData.students[quizNuovo.pin];
+                        const fatto = (s.status === 'submitted' || s.status === 'published') ? 'consegnato' : 'iniziato';
+                        return (
+                            <Modal onClose={() => setQuizNuovo(null)}>
+                                <div className="text-center">
+                                    <h3 className="text-xl font-extrabold text-[#57534a]">{nomeBreve(s.lastName, s.firstName)} ha già {fatto} il quiz</h3>
+                                    <p className="text-sm text-[#827f75] mt-2 mb-5">Per dargli {quizNuovo.personale ? <b>{quizNuovo.personale.nome}</b> : <b>il quiz della classe</b>} scarico il <b>backup</b> della classe e lo rimetto <b>a zero</b>, con lo stesso PIN. Gli altri alunni non si toccano. Se annulli non cambia niente.</p>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <button onClick={() => setQuizNuovo(null)} className="py-3 rounded-xl font-bold border-2 border-[#57534a] text-[#57534a] hover:bg-gray-50">Annulla</button>
+                                        <button onClick={confermaQuizNuovo} className="py-3 rounded-xl font-bold bg-[#5c8b73] text-white hover:brightness-95">Sì, procedi</button>
+                                    </div>
+                                </div>
+                            </Modal>
+                        );
+                    })()}
 
                     {printingCls && <PrintArea cls={printingCls} classData={db.classes[printingCls]} questions={questions} maxClosed={maxClosed} maxOpen={maxOpen} maxTotal={maxTotal} />}
                 </div>
@@ -1912,9 +2011,9 @@
                 <div style={{ fontFamily: '"Schibsted Grotesk", sans-serif', color: '#262420' }}>
                     {students.length === 0 && <div style={{ padding: 20 }}>Nessuna prova consegnata disponibile per la stampa.</div>}
                     {students.map(s => {
-                        const bd = computeBreakdown(s, questions);
+                        const bd = computeBreakdown(s, domandeDi(classData, s));   // (29/09/2026) il SUO quiz
                         const percent = bd.totalMax ? Math.round(bd.percent) : 0;
-                        const ordered = orderedQuestions(s, questions);
+                        const ordered = orderedQuestions(s, domandeDi(classData, s));
                         const hasClosed = bd.closedMax > 0, hasOpen = bd.openMax > 0;
                         return (
                             <div key={s.pin} className="print-student" style={{ padding: '4mm 0' }}>
@@ -1956,7 +2055,7 @@
                 if (s.status === 'submitted' || s.status === 'published') studentsDone[String(s.pin)] = s;
             });
             const examTitle = (classData && classData.examTitle) || '';
-            const payload = { cls, examTitle, generatedAt: new Date().toISOString(), SOGLIA: SOGLIA_SUFFICIENZA, maxClosed, maxOpen, maxTotal, questions, students: studentsDone };
+            const payload = { cls, examTitle, generatedAt: new Date().toISOString(), SOGLIA: SOGLIA_SUFFICIENZA, maxClosed, maxOpen, maxTotal, questions, prove: classData.prove || {}, students: studentsDone };
             const dataJson = JSON.stringify(payload).replace(/</g, '\\u003c');
 
             const archScript = `
@@ -1979,13 +2078,15 @@
                     if(q.type==='matching'){ var pairs=q.pairs||[]; var tot=pairs.length||4; var ok=0; pairs.forEach(function(p){ if(sel&&sel[p.item]===p.match) ok++; }); if(ok===tot) return q.points; if(ok>=2) return 0.5; return 0; }
                     return 0;
                 };
+                const QS = function(s){ var p = s && s.prova && D.prove ? D.prove[s.prova] : null; return (p && Array.isArray(p.questions)) ? p.questions : Q; };   // (29/09/2026) il quiz SUO, se il prof gliene ha scelto uno
                 const breakdown = function(s){
                     var cs=0,cm=0,os=0,om=0;
-                    Q.forEach(function(q){ var p=pointsFor(q,s); if(q.type==='open'){os+=p;om+=q.points;} else {cs+=p;cm+=q.points;} });
+                    QS(s).forEach(function(q){ var p=pointsFor(q,s); if(q.type==='open'){os+=p;om+=q.points;} else {cs+=p;cm+=q.points;} });
                     var total=cs+os, totalMax=cm+om;
                     return {closedScore:cs,closedMax:cm,openScore:os,openMax:om,total:total,totalMax:totalMax,percent: totalMax?(total/totalMax*100):0};
                 };
                 const ordered = function(s){
+                    var Q = QS(s);
                     var ord=s.questionOrder; if(Array.isArray(ord)&&ord.length){ var byId={}; Q.forEach(function(q){byId[q.id]=q;}); var list=ord.map(function(id){return byId[id];}).filter(Boolean); Q.forEach(function(q){ if(ord.indexOf(q.id)<0) list.push(q); }); return list; } return Q;
                 };
                 const students = Object.keys(D.students).map(function(k){ return D.students[k]; }).sort(function(a,b){ var pr=function(s){ var n=(s.lastName||'')+' '+(s.firstName||''); return /\bbecattini\b/i.test(n) && /\bmauro\b/i.test(n); }; return ((pr(b)?1:0)-(pr(a)?1:0)) || (a.lastName+a.firstName).localeCompare(b.lastName+b.firstName); });
@@ -2662,7 +2763,7 @@
                che non fanno in tempo restano nella copia del dispositivo e ripartono dopo il ricarico, stesso gettone).
                Il ricarico e' un F5: l'alunno torna sulla sua prova. Mai al docente, mai su «Accesso bloccato» o
                «Sessione chiusa». Al massimo una volta ogni 10 minuti. */
-            const VERSIONE_APP = '20260929-02';
+            const VERSIONE_APP = '20260929-03';
             const loadingRef = useRef(true);
             useEffect(() => { loadingRef.current = loading; }, [loading]);
             useEffect(() => {
