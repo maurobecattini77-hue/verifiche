@@ -217,7 +217,7 @@
         const prossimoSeq = () => { ultimoSeq = Math.max(Date.now(), ultimoSeq + 1); return ultimoSeq; };   // sempre crescente
 
         const SESSION_KEY = "ab_exam_session_v1"; 
-        const SOGLIA_SUFFICIENZA = 60;            
+        const SOGLIA_SUFFICIENZA = 59.1;   // (29/09/2026) sufficiente = voto 6 o piu': il 6 comincia al 59,1% (scala di Mauro)            
 
         /* =====================================================================
            UTILS PER IL GOVERNO DELLE RISPOSTE E DEI PUNTEGGI
@@ -363,18 +363,22 @@
         // Numero "all'italiana" (virgola decimale)
         const fmtN = (n) => parseFloat(Number(n || 0).toFixed(2)).toString().replace('.', ',');
 
-        // Conversione percentuale → voto del registro (3 minimo, 10 massimo)
+        // Conversione percentuale → voto del registro (3 minimo, 10 massimo).
+        // (29/09/2026) LA SCALA DI MAURO, identica a Cedolino e Fattura (VOTO_BANDS): sotto il 30% voto 3; dal 4 in su
+        // ottave uniformi di 10% con schema +2,0 (voto+), +3,5 (voto,5), +2,0 (voto- del successivo), +2,5 (voto pieno).
+        // La percentuale NON si arrotonda: 59,1% = 6 (verde), 59% = 6- (rosso). Prima una tabella arrotondata dava
+        // «6» in rosso fra il 58,5% e il 60%.
+        const VOTO_BANDS = [
+            [0, "3"], [30.1, "4"], [41.6, "4+"], [43.6, "4,5"], [47.1, "5-"], [49.1, "5"], [51.6, "5+"], [53.6, "5,5"],
+            [57.1, "6-"], [59.1, "6"], [61.6, "6+"], [63.6, "6,5"], [67.1, "7-"], [69.1, "7"], [71.6, "7+"], [73.6, "7,5"],
+            [77.1, "8-"], [79.1, "8"], [81.6, "8+"], [83.6, "8,5"], [87.1, "9-"], [89.1, "9"], [91.6, "9+"], [93.6, "9,5"],
+            [97.1, "10-"], [99.1, "10"]
+        ];
         const votoFromPercent = (percent) => {
-            const p = Math.round(percent);
-            if (p <= 30) return "3";
-            const tabella = [
-                [41, "4"], [43, "4+"], [46, "4,5"], [48, "5-"], [51, "5"], [53, "5+"], [56, "5,5"],
-                [58, "6-"], [61, "6"], [63, "6+"], [66, "6,5"], [68, "7-"], [71, "7"], [73, "7+"],
-                [76, "7,5"], [78, "8-"], [81, "8"], [83, "8+"], [86, "8,5"], [88, "9-"], [91, "9"],
-                [93, "9+"], [96, "9,5"], [98, "10-"], [100, "10"]
-            ];
-            for (let k = 0; k < tabella.length; k++) { if (p <= tabella[k][0]) return tabella[k][1]; }
-            return "10";
+            const p = Number(percent) || 0;
+            let v = VOTO_BANDS[0][1];
+            for (let k = 0; k < VOTO_BANDS.length; k++) { if (p >= VOTO_BANDS[k][0]) v = VOTO_BANDS[k][1]; }
+            return v;
         };
 
         const findStudent = (classes, pin) => {
@@ -728,7 +732,7 @@
             const bd = computeBreakdown(student, questions);
             const total = bd.total;
             const percent = bd.totalMax ? Math.round(bd.percent) : 0;
-            const passed = percent >= SOGLIA_SUFFICIENZA;
+            const passed = bd.percent >= SOGLIA_SUFFICIENZA;
             const ordered = orderedQuestions(student, questions);
             const answeredCount = questions.filter(q => isAnswered(q, student)).length;
             const hasClosed = bd.closedMax > 0;
@@ -1961,12 +1965,11 @@
                 const Q = D.questions;
                 const SOGLIA = D.SOGLIA;
                 const fmtN = function(n){ return parseFloat(Number(n||0).toFixed(2)).toString().replace('.', ','); };
-                const votoFromPercent = function(percent){
-                    var p = Math.round(percent);
-                    if (p <= 30) return "3";
-                    var t = [[41,"4"],[43,"4+"],[46,"4,5"],[48,"5-"],[51,"5"],[53,"5+"],[56,"5,5"],[58,"6-"],[61,"6"],[63,"6+"],[66,"6,5"],[68,"7-"],[71,"7"],[73,"7+"],[76,"7,5"],[78,"8-"],[81,"8"],[83,"8+"],[86,"8,5"],[88,"9-"],[91,"9"],[93,"9+"],[96,"9,5"],[98,"10-"],[100,"10"]];
-                    for (var k=0;k<t.length;k++){ if (p<=t[k][0]) return t[k][1]; }
-                    return "10";
+                const votoFromPercent = function(percent){   // (29/09/2026) la scala di Mauro, come nell'app
+                    var p = Number(percent) || 0;
+                    var t = [[0,"3"],[30.1,"4"],[41.6,"4+"],[43.6,"4,5"],[47.1,"5-"],[49.1,"5"],[51.6,"5+"],[53.6,"5,5"],[57.1,"6-"],[59.1,"6"],[61.6,"6+"],[63.6,"6,5"],[67.1,"7-"],[69.1,"7"],[71.6,"7+"],[73.6,"7,5"],[77.1,"8-"],[79.1,"8"],[81.6,"8+"],[83.6,"8,5"],[87.1,"9-"],[89.1,"9"],[91.6,"9+"],[93.6,"9,5"],[97.1,"10-"],[99.1,"10"]];
+                    var v = t[0][1]; for (var k=0;k<t.length;k++){ if (p>=t[k][0]) v = t[k][1]; }
+                    return v;
                 };
                 const pointsFor = function(q, s){
                     if(q.type==='open'){ var g=s.openGrades&&s.openGrades[q.id]; return (g&&g.score!=null)?g.score:0; }
@@ -2028,7 +2031,7 @@
 
                 function Dettaglio(props){
                     var s=props.student; var bd=breakdown(s);
-                    var pct=bd.totalMax?Math.round(bd.percent):0; var voto=votoFromPercent(bd.percent); var passed=pct>=SOGLIA;
+                    var pct=bd.totalMax?Math.round(bd.percent):0; var voto=votoFromPercent(bd.percent); var passed=bd.percent>=SOGLIA;
                     var list=ordered(s); var hasClosed=bd.closedMax>0, hasOpen=bd.openMax>0;
                     return (
                         <div className="max-w-2xl mx-auto px-4 py-6">
@@ -2085,7 +2088,7 @@
                                                     <td className="px-4 py-3 text-center font-semibold text-[#57534a]">{fmtN(bd.closedScore)+"/"+fmtN(bd.closedMax)}</td>
                                                     <td className="px-4 py-3 text-center font-semibold">{hasOpen?(fmtN(bd.openScore)+"/"+fmtN(bd.openMax)):"—"}</td>
                                                     <td className="px-4 py-3 text-center font-extrabold text-[#57534a]">{fmtN(bd.total)+"/"+fmtN(bd.totalMax)}</td>
-                                                    <td className={"px-4 py-3 text-center font-extrabold "+(pct>=SOGLIA?"text-[#5c8b73]":"text-[#b4472f]")}>{pct+"%"}</td>
+                                                    <td className={"px-4 py-3 text-center font-extrabold "+(bd.percent>=SOGLIA?"text-[#5c8b73]":"text-[#b4472f]")}>{pct+"%"}</td>
                                                     <td className="px-4 py-3 text-center font-bold">{voto}</td>
                                                     <td className="px-4 py-3 text-right text-gray-300">&rsaquo;</td>
                                                 </tr>
@@ -2659,7 +2662,7 @@
                che non fanno in tempo restano nella copia del dispositivo e ripartono dopo il ricarico, stesso gettone).
                Il ricarico e' un F5: l'alunno torna sulla sua prova. Mai al docente, mai su «Accesso bloccato» o
                «Sessione chiusa». Al massimo una volta ogni 10 minuti. */
-            const VERSIONE_APP = '20260929-01';
+            const VERSIONE_APP = '20260929-02';
             const loadingRef = useRef(true);
             useEffect(() => { loadingRef.current = loading; }, [loading]);
             useEffect(() => {
