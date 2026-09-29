@@ -1011,6 +1011,191 @@
         /* =====================================================================
            CRUSCOTTO DEL DOCENTE (ADMIN PANEL) E ARCHIVIO
         ===================================================================== */
+        /* SCEGLI QUIZ (29/09/2026, chiesto da Mauro): niente piu' file da caricare. L'elenco dei quiz lo tiene Claude nel
+           cloud (tabelle ver_catalogo e ver_catalogo_moduli, lette SOLO dal docente con ver_catalogo_elenco e
+           ver_catalogo_prova: dentro ci sono le risposte giuste). Classi terze / quarte / quinte -> moduli -> in alto le
+           Verifiche (solo se ci sono), poi i Quiz, ognuno con la sua descrizione, l'occhio per l'anteprima e «Scegli».
+           Un modulo ancora vuoto dice «Nessun quiz». */
+        const TIPO_DOMANDA = { single: 'Scelta singola', multi: 'Scelta multipla', matching: 'Abbinamento', open: 'Aperta' };
+
+        const AnteprimaQuiz = ({ prova }) => {
+            const domande = (prova && Array.isArray(prova.domande)) ? prova.domande : [];
+            const punti = domande.reduce((a, q) => a + (Number(q.points) || 0), 0);
+            const giuste = (q) => q.type === 'multi' ? (q.correctIndices || []) : [q.correctIndex];
+            return (
+                <div>
+                    <div className="text-xs font-bold text-gray-400 uppercase tracking-widest">{domande.length} domande · {fmtN(punti)} punti</div>
+                    <h3 className="text-lg font-extrabold text-[#57534a] mb-3 leading-snug">{prova && prova.titolo}</h3>
+                    <div className="space-y-3 max-h-[55vh] overflow-y-auto pr-1">
+                        {domande.map((q, i) => (
+                            <div key={q.id || i} className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
+                                <div className="flex justify-between items-center mb-2 gap-2">
+                                    <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Domanda {i + 1} · {TIPO_DOMANDA[q.type] || q.type}</span>
+                                    <span className="text-xs font-bold px-2 py-1 rounded bg-gray-100 text-[#57534a] whitespace-nowrap">{fmtN(q.points)} pt</span>
+                                </div>
+                                <p className="font-bold text-[#262420] mb-3 leading-relaxed text-sm">{q.question}</p>
+                                {(q.type === 'single' || q.type === 'multi') && (
+                                    <div className="space-y-1.5">
+                                        {(q.options || []).map((o, k) => {
+                                            const ok = giuste(q).includes(k);
+                                            return (
+                                                <div key={k} className={`px-3 py-2 rounded-xl text-sm flex items-center gap-2 border ${ok ? 'bg-[#5c8b73]/10 border-[#5c8b73] text-[#3f6a52] font-semibold' : 'bg-white border-gray-200 text-[#262420]'}`}>
+                                                    <span className="w-4 flex-shrink-0">{ok && <Icon name="check" size={16}/>}</span>
+                                                    <span className="leading-snug">{o}</span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                                {q.type === 'matching' && (
+                                    <div className="space-y-1.5">
+                                        {(q.pairs || []).map((p, k) => (
+                                            <div key={k} className="px-3 py-2 rounded-xl text-sm border border-gray-200">
+                                                <div className="text-[#262420] leading-snug">{p.item}</div>
+                                                <div className="text-[#3f6a52] font-semibold leading-snug mt-0.5 flex items-center gap-1"><Icon name="next" size={14}/> {p.match}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                {q.type === 'open' && q.explanation && (
+                                    <div className="bg-gray-50 rounded-xl p-3 text-sm text-[#57534a] leading-relaxed">
+                                        <div className="text-xs font-bold uppercase mb-1">Traccia di correzione</div>
+                                        {q.explanation}
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        const SceltaQuiz = ({ cls, onScegli, onChiudi }) => {
+            const [elenco, setElenco] = useState(null);           // null = sto leggendo; 'errore'; oppure l'elenco
+            const [annoAperto, setAnnoAperto] = useState(null);
+            const [moduloAperto, setModuloAperto] = useState(null);
+            const [anteprima, setAnteprima] = useState(null);     // { voce, prova }
+            const [attesa, setAttesa] = useState(null);           // id della voce che sto leggendo dal cloud
+            const [errore, setErrore] = useState('');
+
+            useEffect(() => {
+                let vivo = true;
+                (async () => {
+                    try {
+                        const { data, error } = await supabase.rpc('ver_catalogo_elenco');
+                        if (!vivo) return;
+                        setElenco(error || !Array.isArray(data) ? 'errore' : data);
+                    } catch (e) { if (vivo) setElenco('errore'); }
+                })();
+                return () => { vivo = false; };
+            }, []);
+
+            const leggiProva = async (voce) => {
+                const { data, error } = await supabase.rpc('ver_catalogo_prova', { p_id: voce.id });
+                if (error || !data || !Array.isArray(data.domande) || !data.domande.length) throw new Error('prova');
+                return data;
+            };
+            const apriAnteprima = async (voce) => {
+                if (attesa) return;
+                setAttesa(voce.id); setErrore('');
+                try { const prova = await leggiProva(voce); setAnteprima({ voce, prova }); }
+                catch (e) { setErrore('Il collegamento non risponde: riprova.'); }
+                setAttesa(null);
+            };
+            const scegli = async (voce, prova) => {
+                if (attesa) return;
+                setAttesa(voce.id); setErrore('');
+                try { const p = prova || await leggiProva(voce); setAttesa(null); onScegli(p); }
+                catch (e) { setErrore('Il collegamento non risponde: riprova.'); setAttesa(null); }
+            };
+
+            const rigaVoce = (v) => (
+                <div key={v.id} className="bg-white border border-gray-200 rounded-xl p-3 flex items-center gap-3">
+                    <div className="flex-grow min-w-0">
+                        <div className="font-bold text-[#262420] text-sm">{v.titolo}</div>
+                        {v.descrizione && <div className="text-xs text-[#827f75] leading-snug mt-0.5">{v.descrizione}</div>}
+                        <div className="text-[11px] font-semibold text-gray-400 mt-1">{v.domande} domande · {fmtN(v.punti)} punti</div>
+                    </div>
+                    <button onClick={() => apriAnteprima(v)} title="Anteprima delle domande" className="bg-gray-100 text-[#57534a] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-gray-200 flex-shrink-0"><Icon name="eye" size={14}/> Anteprima</button>
+                    <button onClick={() => scegli(v)} disabled={!!attesa} className="bg-[#57534a] text-white rounded-lg px-3 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-[#454138] disabled:opacity-50 flex-shrink-0">{attesa === v.id ? 'Un momento…' : 'Scegli'}</button>
+                </div>
+            );
+
+            return (
+                <Modal onClose={onChiudi} maxW="max-w-2xl">
+                    <div className="flex items-start justify-between gap-3 mb-4">
+                        <div>
+                            <div className="text-xs font-bold text-gray-400 uppercase tracking-widest">Classe {cls}</div>
+                            <h3 className="text-xl font-extrabold text-[#57534a]">{anteprima ? 'Anteprima' : 'Scegli quiz'}</h3>
+                        </div>
+                        <button onClick={onChiudi} className="text-gray-400 hover:text-[#57534a]"><Icon name="x" size={22}/></button>
+                    </div>
+                    {errore && <div className="mb-3 text-sm font-semibold text-[#b4472f]">{errore}</div>}
+
+                    {anteprima ? (
+                        <div>
+                            <AnteprimaQuiz prova={anteprima.prova} />
+                            <div className="grid grid-cols-2 gap-3 mt-5">
+                                <button onClick={() => setAnteprima(null)} className="py-3 rounded-xl font-bold border-2 border-[#57534a] text-[#57534a] hover:bg-gray-50 flex items-center justify-center gap-1"><Icon name="prev" size={16}/> Torna all'elenco</button>
+                                <button onClick={() => scegli(anteprima.voce, anteprima.prova)} disabled={!!attesa} className="py-3 rounded-xl font-bold bg-[#57534a] text-white hover:bg-[#454138] disabled:opacity-50">Scegli questo quiz</button>
+                            </div>
+                        </div>
+                    ) : elenco === null ? (
+                        <div className="py-10 text-center text-sm font-semibold text-[#827f75]">Caricamento dell'elenco…</div>
+                    ) : elenco === 'errore' ? (
+                        <div className="py-10 text-center text-sm font-semibold text-[#b4472f]">Non riesco a leggere l'elenco dei quiz: chiudi e riprova.</div>
+                    ) : (
+                        <div className="space-y-2 max-h-[65vh] overflow-y-auto pr-1">
+                            {elenco.map(a => {
+                                const apertoA = annoAperto === a.anno;
+                                return (
+                                    <div key={a.anno}>
+                                        <button onClick={() => { setAnnoAperto(apertoA ? null : a.anno); setModuloAperto(null); }}
+                                            className={`w-full flex items-center justify-between rounded-xl px-4 py-3 font-bold text-left transition-colors ${apertoA ? 'bg-[#57534a] text-white' : 'bg-gray-100 text-[#57534a] hover:bg-gray-200'}`}>
+                                            <span>{a.nome}</span>
+                                            <span className={`transition-transform ${apertoA ? 'rotate-180' : ''}`}><Icon name="chevron" size={18}/></span>
+                                        </button>
+                                        {apertoA && (
+                                            <div className="mt-2 ml-3 space-y-2">
+                                                {(a.moduli || []).map(m => {
+                                                    const chiave = a.anno + '|' + m.nome;
+                                                    const apertoM = moduloAperto === chiave;
+                                                    const voci = m.voci || [];
+                                                    const verifiche = voci.filter(v => v.tipo === 'verifica');
+                                                    const quiz = voci.filter(v => v.tipo !== 'verifica');
+                                                    return (
+                                                        <div key={chiave} className="border border-gray-200 rounded-xl overflow-hidden">
+                                                            <button onClick={() => setModuloAperto(apertoM ? null : chiave)}
+                                                                className="w-full flex items-center justify-between px-4 py-2.5 text-left bg-white hover:bg-gray-50">
+                                                                <span className="font-bold text-sm text-[#262420]">{m.nome}</span>
+                                                                <span className="flex items-center gap-2 flex-shrink-0 ml-3">
+                                                                    <span className="text-[11px] font-semibold text-gray-400">{voci.length ? [verifiche.length ? verifiche.length + (verifiche.length === 1 ? ' verifica' : ' verifiche') : '', quiz.length ? quiz.length + ' quiz' : ''].filter(Boolean).join(' · ') : 'Nessun quiz'}</span>
+                                                                    <span className={`text-[#57534a] transition-transform ${apertoM ? 'rotate-180' : ''}`}><Icon name="chevron" size={16}/></span>
+                                                                </span>
+                                                            </button>
+                                                            {apertoM && (
+                                                                <div className="bg-gray-50 px-3 py-3 space-y-2 border-t border-gray-200">
+                                                                    {!voci.length && <div className="text-sm text-gray-400 px-1">Nessun quiz</div>}
+                                                                    {verifiche.length > 0 && <div className="text-[11px] font-bold text-gray-400 uppercase tracking-widest px-1">Verifiche</div>}
+                                                                    {verifiche.map(rigaVoce)}
+                                                                    {quiz.length > 0 && <div className={`text-[11px] font-bold text-gray-400 uppercase tracking-widest px-1 ${verifiche.length ? 'pt-2' : ''}`}>Quiz</div>}
+                                                                    {quiz.map(rigaVoce)}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </Modal>
+            );
+        };
+
         const AdminApp = ({ db, onSyncUpdate, onResetDB, onExit }) => {
             const classesList = Object.keys(db.classes || {});
             const [cls, setCls] = useState(classesList[0] || "");
@@ -1024,9 +1209,9 @@
             const [printingCls, setPrintingCls] = useState(null);
             const [forceAllOpen, setForceAllOpen] = useState(false);
             const [undoAllOpen, setUndoAllOpen] = useState(false);
+            const [sceltaOpen, setSceltaOpen] = useState(false);   // finestra «Scegli quiz»
 
             const classInputRef = useRef(null);
-            const testInputRef = useRef(null);
             const backupInputRef = useRef(null);
 
             useEffect(() => { if (!cls && classesList.length > 0) setCls(classesList[0]); }, [classesList, cls]);
@@ -1094,7 +1279,7 @@
                             };
                         });
                         const existing = db.classes[parsed.classe];
-                        const updatedClasses = { ...db.classes, [parsed.classe]: { published: false, esercitazione: (existing && existing.esercitazione) || false, students: newStudents, questions: (existing && existing.questions) || [], examTitle: (existing && existing.examTitle) || '' } };
+                        const updatedClasses = { ...db.classes, [parsed.classe]: { published: false, esercitazione: false, students: newStudents, questions: (existing && existing.questions) || [], examTitle: (existing && existing.examTitle) || '' } };
                         onSyncUpdate(null, null, null, updatedClasses);
                         setCls(parsed.classe);
                         alert(`Classe ${parsed.classe} caricata correttamente!`);
@@ -1104,29 +1289,20 @@
                 e.target.value = "";
             };
 
-            const handleUploadProva = (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                if (!cls || !classData) { alert("Seleziona prima la classe a cui vuoi abbinare questa verifica."); e.target.value = ""; return; }
-                const reader = new FileReader();
-                reader.onload = () => {
-                    try {
-                        const parsed = JSON.parse(reader.result);
-                        const domande = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.domande) ? parsed.domande : null);
-                        if (!domande || domande.length === 0) throw new Error("Nessuna domanda trovata.");
-                        const titolo = (!Array.isArray(parsed) && parsed && parsed.titolo) ? String(parsed.titolo) : '';
-                        // (21/09/2026, chiesto da Mauro) Se in questa classe qualcuno ha gia' iniziato o consegnato la verifica di
-                        // prima, le sue risposte (salvate per numero di domanda) finirebbero corrette contro le domande nuove, e
-                        // rientrando col PIN vedrebbe le soluzioni della verifica nuova senza averla fatta. Quindi si chiede
-                        // conferma e, col si', si scarica il backup, si rimettono tutti a zero e si abbina la verifica nuova.
-                        if (Object.values(classData.students || {}).some(s => s && s.status && s.status !== 'idle')) { setProvaNuova({ domande, titolo }); return; }
-                        const updatedClasses = { ...db.classes, [cls]: { ...classData, questions: domande, examTitle: titolo } };
-                        onSyncUpdate(null, null, null, updatedClasses);
-                        alert(`Verifica abbinata alla classe ${cls} (${domande.length} domande${titolo ? ' · ' + titolo : ''}).`);
-                    } catch (err) { alert("Errore nel file JSON dei quesiti."); }
-                };
-                reader.readAsText(file);
-                e.target.value = "";
+            // (29/09/2026) Il quiz arriva dall'elenco del cloud («Scegli quiz»), non piu' da un file.
+            const abbinaProva = (prova) => {
+                setSceltaOpen(false);
+                if (!cls || !classData) { alert("Seleziona prima la classe a cui vuoi abbinare il quiz."); return; }
+                const domande = prova.domande;
+                const titolo = prova.titolo ? String(prova.titolo) : '';
+                // (21/09/2026, chiesto da Mauro) Se in questa classe qualcuno ha gia' iniziato o consegnato la verifica di
+                // prima, le sue risposte (salvate per numero di domanda) finirebbero corrette contro le domande nuove, e
+                // rientrando col PIN vedrebbe le soluzioni della verifica nuova senza averla fatta. Quindi si chiede
+                // conferma e, col si', si scarica il backup, si rimettono tutti a zero e si abbina la verifica nuova.
+                if (Object.values(classData.students || {}).some(s => s && s.status && s.status !== 'idle')) { setProvaNuova({ domande, titolo }); return; }
+                const updatedClasses = { ...db.classes, [cls]: { ...classData, questions: domande, examTitle: titolo } };
+                onSyncUpdate(null, null, null, updatedClasses);
+                alert(`Quiz abbinato alla classe ${cls} (${domande.length} domande${titolo ? ' · ' + titolo : ''}).`);
             };
 
             // VERIFICA NUOVA su una classe che ne ha gia' svolta una: backup, alunni a zero (stessi PIN), verifica abbinata.
@@ -1147,13 +1323,6 @@
                 onSyncUpdate(null, null, null, updatedClasses);
                 alert(`Verifica abbinata alla classe ${cls} (${provaNuova.domande.length} domande${provaNuova.titolo ? ' · ' + provaNuova.titolo : ''}). Backup scaricato, alunni rimessi a zero.`);
                 setProvaNuova(null);
-            };
-
-            // ESERCITAZIONE: attiva/disattiva la modalità esercitazione per la classe selezionata.
-            const toggleEsercitazione = () => {
-                if (!classData) return;
-                const updatedClasses = { ...db.classes, [cls]: { ...classData, esercitazione: !esercitazione } };
-                onSyncUpdate(null, null, null, updatedClasses);
             };
 
             const sblocca = (pin) => {
@@ -1325,7 +1494,7 @@
                             Object.values(parsed.dati.students).forEach(s => { studentsNorm[String(s.pin)] = normalizzaStudente(s); });
                             const quesitiClasse = (Array.isArray(parsed.quesiti) && parsed.quesiti.length) ? parsed.quesiti : ((db.classes[parsed.classe] && db.classes[parsed.classe].questions) || []);
                             const titoloClasse = parsed.examTitle || ((db.classes[parsed.classe] && db.classes[parsed.classe].examTitle) || '');
-                            const updatedClasses = { ...db.classes, [parsed.classe]: { published: !!parsed.dati.published, esercitazione: !!parsed.dati.esercitazione, students: studentsNorm, questions: quesitiClasse, examTitle: titoloClasse } };
+                            const updatedClasses = { ...db.classes, [parsed.classe]: { published: !!parsed.dati.published, esercitazione: false, students: studentsNorm, questions: quesitiClasse, examTitle: titoloClasse } };
                             onSyncUpdate(null, null, null, updatedClasses);
                             setCls(parsed.classe);
                             alert("Backup della classe " + parsed.classe + " ripristinato" + ((Array.isArray(parsed.quesiti) && parsed.quesiti.length) ? " (insieme alla verifica abbinata)." : "."));
@@ -1335,7 +1504,7 @@
                             Object.keys(parsed.classes).forEach(c => {
                                 const studentsNorm = {};
                                 Object.values(parsed.classes[c].students || {}).forEach(s => { studentsNorm[String(s.pin)] = normalizzaStudente(s); });
-                                restored[c] = { published: !!parsed.classes[c].published, esercitazione: !!parsed.classes[c].esercitazione, students: studentsNorm, questions: (parsed.classes[c].questions || (Array.isArray(parsed.questions) ? parsed.questions : [])), examTitle: (parsed.classes[c].examTitle || '') };
+                                restored[c] = { published: !!parsed.classes[c].published, esercitazione: false, students: studentsNorm, questions: (parsed.classes[c].questions || (Array.isArray(parsed.questions) ? parsed.questions : [])), examTitle: (parsed.classes[c].examTitle || '') };
                             });
                             onSyncUpdate(null, null, null, restored);
                             const primo = Object.keys(restored)[0];
@@ -1350,17 +1519,25 @@
                 e.target.value = "";
             };
 
+            // RESET (29/09/2026, come in Cedolino Facile): le classi restano per tutto l'anno. Si tolgono il quiz e i
+            // risultati; gli alunni restano, con gli stessi PIN, rimessi a zero come fa confermaProvaNuova.
             const doReset = () => {
                 if (!cls || !db.classes[cls]) { setResetOpen(false); setResetText(""); return; }
-                exportBackup();                // sicurezza: scarica il backup di QUESTA classe prima di rimuoverla
-                const updated = { ...db.classes };
-                delete updated[cls];           // rimuovo solo la classe selezionata (con la sua verifica); le altre restano intatte
-                onSyncUpdate(null, null, null, updated);
-                const rimaste = Object.keys(updated);
-                setCls(rimaste[0] || "");
+                exportBackup();                // sicurezza: scarica il backup di QUESTA classe prima di azzerarla
+                const azzerati = {};
+                Object.keys(classData.students || {}).forEach(p => {
+                    const s = classData.students[p];
+                    azzerati[p] = {
+                        pin: String(s.pin), firstName: s.firstName, lastName: s.lastName,
+                        status: 'idle', answers: {}, openAnswer: '', openScore: null,
+                        openComment: '', closedScore: null, graded: false, startedAt: null, submittedAt: null
+                    };
+                });
+                const updatedClasses = { ...db.classes, [cls]: { ...classData, published: false, esercitazione: false, students: azzerati, questions: [], examTitle: '' } };
+                onSyncUpdate(null, null, null, updatedClasses);
                 setResetOpen(false);
                 setResetText("");
-                alert("Classe " + cls + " rimossa dal cloud (backup scaricato). Le altre classi restano attive.");
+                alert("Classe " + cls + ": quiz e risultati tolti (backup scaricato). Gli alunni e i PIN restano.");
             };
             
             useEffect(() => {
@@ -1397,16 +1574,6 @@
                                         <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"><Icon name="chevron" size={16}/></span>
                                     </div>
                                 )}
-                                {classData && (
-                                    <button onClick={toggleEsercitazione} title="Attiva/disattiva la modalità esercitazione per questa classe"
-                                        className={`rounded-xl px-3 py-2.5 font-bold flex items-center gap-2 text-sm transition-colors ${esercitazione ? 'bg-[#5c8b73] text-white hover:brightness-95' : 'bg-white/10 text-white hover:bg-white/20'}`}>
-                                        <Icon name={esercitazione ? 'unlock' : 'lock'} size={16}/>
-                                        <span className="flex flex-col leading-none text-left">
-                                            <span className="text-[10px] uppercase tracking-widest opacity-70">Modalità</span>
-                                            <span>{esercitazione ? 'Esercitazione' : 'Verifica'}</span>
-                                        </span>
-                                    </button>
-                                )}
                                 <button onClick={onExit} className="bg-white/10 hover:bg-white/20 rounded-xl px-3 py-2.5 font-bold flex items-center gap-1.5 text-sm"><Icon name="logout" size={16}/> Esci</button>
                             </div>
                         </div>
@@ -1418,10 +1585,9 @@
                                 <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Caricamento Setup Primario</h4>
                                 <div className="flex gap-2">
                                     <input type="file" accept=".json" ref={classInputRef} onChange={handleUploadClasse} className="hidden" />
-                                    <button onClick={() => classInputRef.current.click()} className="flex-1 py-3 border-2 border-[#57534a] text-[#57534a] font-bold rounded-xl text-xs flex items-center justify-center gap-2 hover:bg-gray-50"><Icon name="users" size={16}/> Carica Alunni (JSON)</button>
-                                    
-                                    <input type="file" accept=".json" ref={testInputRef} onChange={handleUploadProva} className="hidden" />
-                                    <button onClick={() => testInputRef.current.click()} className="flex-1 py-3 bg-[#57534a] text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 hover:bg-[#454138]"><Icon name="upload" size={16}/> Carica Quesiti (JSON)</button>
+                                    <button onClick={() => classInputRef.current.click()} className="flex-1 py-3 border-2 border-[#57534a] text-[#57534a] font-bold rounded-xl text-xs flex items-center justify-center gap-2 hover:bg-gray-50"><Icon name="users" size={16}/> Carica classe</button>
+
+                                    <button onClick={() => setSceltaOpen(true)} disabled={!classData} className="flex-1 py-3 bg-[#57534a] text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 hover:bg-[#454138] disabled:opacity-40"><Icon name="archive" size={16}/> Scegli quiz</button>
                                 </div>
                             </div>
                             <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-around">
@@ -1432,7 +1598,6 @@
 
                         {classesList.length > 0 && (
                             <div className="fade-in">
-                                {esercitazione && <div className="mb-3 bg-[#5c8b73]/10 text-[#3f6a52] text-sm font-semibold rounded-xl px-4 py-2.5 flex items-center gap-2"><Icon name="refresh" size={16}/> Modalità <b>Esercitazione</b> attiva per la classe {cls}: nessun blocco, voto immediato alla consegna e ritentativi liberi.</div>}
                                 <div className="flex flex-wrap md:flex-nowrap items-center gap-1.5 mb-4">
                                     <button onClick={() => setPubOpen(true)} className="bg-[#5c8b73] text-white font-bold rounded-xl px-3 py-2.5 text-sm flex items-center gap-1.5 hover:brightness-95 scale-hover whitespace-nowrap"><Icon name="eye" size={16}/> Pubblica voti</button>
                                     <button onClick={() => setForceAllOpen(true)} disabled={playingCount === 0} className="bg-[#d99a4e] text-white font-bold rounded-xl px-3 py-2.5 text-sm flex items-center gap-1.5 hover:brightness-95 scale-hover disabled:opacity-30 whitespace-nowrap"><Icon name="send" size={16}/> Consegna classe{playingCount > 0 ? ` (${playingCount})` : ''}</button>
@@ -1603,15 +1768,17 @@
                         <Modal onClose={() => { setResetOpen(false); setResetText(""); }}>
                             <div className="text-center">
                                 <h3 className="text-xl font-extrabold text-[#b4472f]">Reset della classe {cls}</h3>
-                                <p className="text-sm text-[#827f75] mt-2 mb-4">Questa operazione rimuove dal cloud <b>solo la classe {cls}</b> (alunni, risposte e correzioni); tutte le altre classi restano intatte. Prima della rimozione viene scaricato in automatico un backup di questa classe. Scrivi <span className="font-mono bg-gray-100 px-2 py-0.5 rounded text-[#b4472f]">RESET</span> per confermare.</p>
+                                <p className="text-sm text-[#827f75] mt-2 mb-4">Dalla classe {cls} tolgo <b>il quiz e tutti i risultati</b> (risposte, voti e correzioni). La classe resta, con gli stessi alunni e gli stessi PIN; le altre classi non si toccano. Prima scarico in automatico un backup di questa classe. Scrivi <span className="font-mono bg-gray-100 px-2 py-0.5 rounded text-[#b4472f]">RESET</span> per confermare.</p>
                                 <input value={resetText} onChange={e => setResetText(e.target.value)} placeholder="RESET" className="w-full text-center text-lg font-bold py-3 rounded-xl border-2 border-gray-200 focus:border-[#b4472f] outline-none mb-4"/>
                                 <div className="grid grid-cols-2 gap-3">
                                     <button onClick={() => { setResetOpen(false); setResetText(""); }} className="py-3 rounded-xl font-bold border-2 border-[#57534a] text-[#57534a] hover:bg-gray-50">Annulla</button>
-                                    <button disabled={resetText !== 'RESET'} onClick={doReset} className="py-3 rounded-xl font-bold bg-[#b4472f] text-white disabled:opacity-30 hover:brightness-95">Rimuovi questa classe</button>
+                                    <button disabled={resetText !== 'RESET'} onClick={doReset} className="py-3 rounded-xl font-bold bg-[#b4472f] text-white disabled:opacity-30 hover:brightness-95">Togli quiz e risultati</button>
                                 </div>
                             </div>
                         </Modal>
                     )}
+
+                    {sceltaOpen && <SceltaQuiz cls={cls} onScegli={abbinaProva} onChiudi={() => setSceltaOpen(false)} />}
 
                     {printingCls && <PrintArea cls={printingCls} classData={db.classes[printingCls]} questions={questions} maxClosed={maxClosed} maxOpen={maxOpen} maxTotal={maxTotal} />}
                 </div>
@@ -2492,7 +2659,7 @@
                che non fanno in tempo restano nella copia del dispositivo e ripartono dopo il ricarico, stesso gettone).
                Il ricarico e' un F5: l'alunno torna sulla sua prova. Mai al docente, mai su «Accesso bloccato» o
                «Sessione chiusa». Al massimo una volta ogni 10 minuti. */
-            const VERSIONE_APP = '20260926-01';
+            const VERSIONE_APP = '20260929-01';
             const loadingRef = useRef(true);
             useEffect(() => { loadingRef.current = loading; }, [loading]);
             useEffect(() => {
