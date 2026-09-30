@@ -2625,6 +2625,14 @@
                     try {
                         const ua = navigator.userAgent || '';
                         if (/iPhone|iPod/.test(ua)) return true;
+                        /* 30/09/2026: altri due pallini FISSI su chi stava lavorando (4I, dashboard verifiche: battito ogni 5 secondi,
+                           risposte che arrivavano, «fuori» dal primo istante e mai un rientro). 1) iPad con la pagina aperta DENTRO
+                           l'app Google (sigla «GSA» nel nome del browser): e' lo stesso visore degli iPhone del 24/09, che li' dentro
+                           lavorano bene con la sola regola della pagina nascosta. L'iPad in Safari resta con tutti i controlli (schermo
+                           diviso). 2) Il browser dei telefoni Xiaomi in «sito desktop» (si presenta «X11; Linux» + «MiuiBrowser»): in
+                           quella modalita' misure e fuoco arrivano falsati. In questi due casi «fuori» = pagina nascosta, e basta. */
+                        if (/iPad/.test(ua) && /GSA\//.test(ua)) return true;
+                        if (/MiuiBrowser/.test(ua) && /X11; Linux/.test(ua)) return true;
                         if (!/Macintosh/.test(ua) || !(navigator.maxTouchPoints > 1)) return false;
                         const lato = Math.min(screen.width || 0, screen.height || 0);
                         return lato > 0 && lato < 600;
@@ -2763,7 +2771,7 @@
                che non fanno in tempo restano nella copia del dispositivo e ripartono dopo il ricarico, stesso gettone).
                Il ricarico e' un F5: l'alunno torna sulla sua prova. Mai al docente, mai su «Accesso bloccato» o
                «Sessione chiusa». Al massimo una volta ogni 10 minuti. */
-            const VERSIONE_APP = '20260930-01';
+            const VERSIONE_APP = '20260930-02';
             const loadingRef = useRef(true);
             useEffect(() => { loadingRef.current = loading; }, [loading]);
             useEffect(() => {
