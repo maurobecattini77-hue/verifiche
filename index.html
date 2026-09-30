@@ -2655,7 +2655,59 @@
                         return fh < sh * 0.85;
                     } catch (e) { return false; }
                 };
-                const fuoriAdesso = () => iPhoneSoloSchermo() ? document.visibilityState === 'hidden' : (document.visibilityState === 'hidden' || (!document.hasFocus() && !suUnCampo()) || finestraRistretta());
+                /* 30/09/2026 - IL DISPOSITIVO SI STUDIA ALL'INGRESSO (idea approvata da Mauro: «studiarsi il dispositivo fin da
+                   subito e agire di conseguenza»). Tutti i pallini FISSI falsi (4 iPhone in 4G il 24/09, l'iPad e lo Xiaomi in 4I
+                   il 30/09) erano accesi dal primo secondo e non si sono mai spenti: era il dispositivo a raccontare male fuoco e
+                   finestra, non l'alunno a uscire. Chi esce davvero parte DENTRO la pagina e poi esce. Quindi, su telefoni e
+                   tablet, quando l'alunno entra (e' per forza davanti alla pagina) si segna come si presenta il dispositivo: se
+                   gia' li' risulta senza fuoco, per lui il fuoco non conta; se gia' li' la finestra risulta piu' piccola dello
+                   schermo, conta solo se si rimpicciolisce ANCORA rispetto a quell'istante (schermo diviso, finestra mobile:
+                   larghezza sotto il 90% o altezza sotto il 70% di com'era). Il primo giro in orizzontale si studia allo stesso
+                   modo. La pagina nascosta conta sempre. Al computer (e dove conta gia' solo la pagina nascosta) tutto come prima. */
+                let impronta = null, daStudiare = false;
+                const aTocco = () => {
+                    try { return window.matchMedia('(pointer: coarse)').matches || (navigator.maxTouchPoints > 1 && !window.matchMedia('(any-pointer: fine)').matches); } catch (e) { return false; }
+                };
+                const verso = () => {
+                    try {
+                        const t = screen.orientation && screen.orientation.type;
+                        if (t) return t.indexOf('landscape') === 0 ? 'o' : 'v';
+                        if (typeof window.orientation === 'number') return Math.abs(window.orientation) === 90 ? 'o' : 'v';
+                    } catch (e) { }
+                    return window.innerWidth > window.innerHeight ? 'o' : 'v';
+                };
+                const misuraFinestra = () => ({ w: window.outerWidth || window.innerWidth, h: window.outerHeight || window.innerHeight });
+                const studiaVerso = () => {
+                    if (!impronta) return null;
+                    const v = verso();
+                    if (!impronta.versi[v] && document.visibilityState !== 'hidden') impronta.versi[v] = { guasta: finestraRistretta(), m: misuraFinestra() };
+                    return impronta.versi[v] || null;
+                };
+                const studiaSeSiPuo = () => {   // se all'ingresso la pagina non era in vista, si studia al primo istante in cui lo e'
+                    if (!daStudiare || document.visibilityState === 'hidden') return;
+                    daStudiare = false;
+                    try {
+                        if (!aTocco() || iPhoneSoloSchermo()) return;
+                        impronta = { fuocoGuasto: !document.hasFocus(), versi: {} };
+                        studiaVerso();
+                    } catch (e) { impronta = null; }
+                };
+                const studiaDispositivo = () => { impronta = null; daStudiare = true; studiaSeSiPuo(); };
+                const fuocoGuasto = () => { studiaSeSiPuo(); return !!(impronta && impronta.fuocoGuasto); };
+                const finestraFuori = () => {
+                    try {
+                        studiaSeSiPuo();
+                        const b = studiaVerso();
+                        if (!b || !b.guasta) return finestraRistretta();
+                        const m = misuraFinestra();
+                        if (!m.w || !m.h || !b.m.w || !b.m.h) return false;
+                        if (m.w < b.m.w * 0.90) return true;
+                        const a = document.activeElement;
+                        if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) return false;   // la tastiera accorcia la finestra
+                        return m.h < b.m.h * 0.70;
+                    } catch (e) { return false; }
+                };
+                const fuoriAdesso = () => iPhoneSoloSchermo() ? document.visibilityState === 'hidden' : (document.visibilityState === 'hidden' || (!document.hasFocus() && !suUnCampo() && !fuocoGuasto()) || finestraFuori());
                 // Un dispositivo che manda la pagina dietro puo' congelarla o ucciderla senza preavviso: cio' che non e'
                 // ancora confermato parte subito con l'invio che il browser spedisce comunque (keepalive).
                 const salvaResto = () => {
@@ -2664,7 +2716,7 @@
                     try { if (Object.keys(resto).length) porta('ver_rispondi', { ...chiaviSessione(), p_risposte: resto }, true).catch(() => {}); } catch (e) { }
                 };
                 const stato = () => { if (document.visibilityState === 'hidden') salvaResto(); batti(fuoriAdesso(), true); };
-                const via = () => { if (document.visibilityState !== 'hidden' && (suUnCampo() || iPhoneSoloSchermo())) return; batti(true, true); };
+                const via = () => { if (document.visibilityState !== 'hidden' && (suUnCampo() || iPhoneSoloSchermo() || fuocoGuasto())) return; batti(true, true); };
                 const riapre = () => { salutatoRef.current = false; stato(); };
                 const chiude = (e) => {
                     if (e && e.persisted) { via(); return; }        // pagina solo messa da parte: vale come uscita
@@ -2676,6 +2728,7 @@
                     } catch (err) { }
                     salutatoRef.current = true;                     // dopo il saluto il browser manda ancora un «nascosta»: non deve sorpassarlo
                 };
+                studiaDispositivo();   // (30/09/2026) com'e' fatto il dispositivo nel momento in cui l'alunno entra
                 stato();
                 document.addEventListener('visibilitychange', stato);
                 window.addEventListener('blur', via);
@@ -2686,12 +2739,12 @@
                 document.addEventListener('resume', stato);
                 const t = setInterval(() => batti(fuoriAdesso(), false), 5000);
                 // Finestra rimpicciolita o ingrandita, schermo diviso aperto o chiuso: lo dico subito (a trascinamento finito).
-                let ridimTimer = null, ultimoRistretta = finestraRistretta();
+                let ridimTimer = null, ultimoRistretta = finestraFuori();
                 const ridimensiona = () => {
                     if (ridimTimer) clearTimeout(ridimTimer);
                     ridimTimer = setTimeout(() => {
                         ridimTimer = null;
-                        const r = finestraRistretta();
+                        const r = finestraFuori();
                         if (r === ultimoRistretta) return;
                         ultimoRistretta = r;
                         batti(fuoriAdesso(), true);
@@ -2771,7 +2824,7 @@
                che non fanno in tempo restano nella copia del dispositivo e ripartono dopo il ricarico, stesso gettone).
                Il ricarico e' un F5: l'alunno torna sulla sua prova. Mai al docente, mai su «Accesso bloccato» o
                «Sessione chiusa». Al massimo una volta ogni 10 minuti. */
-            const VERSIONE_APP = '20260930-02';
+            const VERSIONE_APP = '20260930-03';
             const loadingRef = useRef(true);
             useEffect(() => { loadingRef.current = loading; }, [loading]);
             useEffect(() => {
