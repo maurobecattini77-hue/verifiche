@@ -558,7 +558,7 @@
                         className="w-full p-4 rounded-xl border-2 border-gray-200 focus:border-[#57534a] outline-none resize-none text-sm md:text-base leading-relaxed disabled:bg-gray-50" />
                     <div className="text-xs text-[#827f75] mt-2 flex items-center justify-between">
                         <span className="flex items-center gap-1"><Icon name="alert" size={13}/> Incolla e trascinamento disattivati.</span>
-                        <span>{(value || '').length} / {maxLength}</span>
+                        {maxLength < 2000 && <span>{(value || '').length} / {maxLength}</span>}
                     </div>
                 </div>
             );
@@ -1088,10 +1088,15 @@
 
         // perChi (29/09/2026): la stessa finestra per il quiz di UN alunno; quizSuo = il nome del quiz personale che ha adesso
         // (null = fa quello della classe), onClasse = rimettergli il quiz della classe.
-        const SceltaQuiz = ({ cls, onScegli, onChiudi, perChi, quizSuo, onClasse }) => {
+        // (18/10/2026) Le verifiche personali hanno un «gruppo» (es. «Verifiche 3F · lunedì 19 ottobre»): stanno nella tendina
+        // «Verifiche» in cima all'anno, divise per gruppo. Dalla finestra della classe si guardano e basta (anteprima e
+        // «assegnata»): «Scegli» le darebbe a tutta la classe. Dalla finestra di un alunno si possono anche scegliere.
+        const SceltaQuiz = ({ cls, onScegli, onChiudi, perChi, quizSuo, onClasse, assegnate }) => {
             const [elenco, setElenco] = useState(null);           // null = sto leggendo; 'errore'; oppure l'elenco
             const [annoAperto, setAnnoAperto] = useState(null);
             const [moduloAperto, setModuloAperto] = useState(null);
+            const [verAperto, setVerAperto] = useState(null);     // anno con la tendina «Verifiche» aperta
+            const [gruppoAperto, setGruppoAperto] = useState(null);
             const [anteprima, setAnteprima] = useState(null);     // { voce, prova }
             const [attesa, setAttesa] = useState(null);           // id della voce che sto leggendo dal cloud
             const [errore, setErrore] = useState('');
@@ -1127,6 +1132,7 @@
                 catch (e) { setErrore('Il collegamento non risponde: riprova.'); setAttesa(null); }
             };
 
+            const soloGuardare = (v) => !!(v && v.gruppo) && !perChi;
             const rigaVoce = (v) => (
                 <div key={v.id} className="bg-white border border-gray-200 rounded-xl p-3 flex items-center gap-3">
                     <div className="flex-grow min-w-0">
@@ -1135,7 +1141,9 @@
                         <div className="text-[11px] font-semibold text-gray-400 mt-1">{v.domande} domande · {fmtN(v.punti)} punti</div>
                     </div>
                     <button onClick={() => apriAnteprima(v)} title="Anteprima delle domande" className="bg-gray-100 text-[#57534a] rounded-lg px-2.5 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-gray-200 flex-shrink-0"><Icon name="eye" size={14}/> Anteprima</button>
-                    <button onClick={() => scegli(v)} disabled={!!attesa} className="bg-[#57534a] text-white rounded-lg px-3 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-[#454138] disabled:opacity-50 flex-shrink-0">{attesa === v.id ? 'Un momento…' : 'Scegli'}</button>
+                    {soloGuardare(v)
+                        ? ((assegnate || []).includes(v.id) ? <span className="bg-[#5c8b73]/15 text-[#3f6a52] rounded-lg px-2.5 py-1.5 font-bold text-xs flex-shrink-0">assegnata</span> : null)
+                        : <button onClick={() => scegli(v)} disabled={!!attesa} className="bg-[#57534a] text-white rounded-lg px-3 py-1.5 font-bold text-xs flex items-center gap-1 hover:bg-[#454138] disabled:opacity-50 flex-shrink-0">{attesa === v.id ? 'Un momento…' : 'Scegli'}</button>}
                 </div>
             );
 
@@ -1159,9 +1167,9 @@
                     {anteprima ? (
                         <div>
                             <AnteprimaQuiz prova={anteprima.prova} />
-                            <div className="grid grid-cols-2 gap-3 mt-5">
+                            <div className={`grid ${soloGuardare(anteprima.voce) ? 'grid-cols-1' : 'grid-cols-2'} gap-3 mt-5`}>
                                 <button onClick={() => setAnteprima(null)} className="py-3 rounded-xl font-bold border-2 border-[#57534a] text-[#57534a] hover:bg-gray-50 flex items-center justify-center gap-1"><Icon name="prev" size={16}/> Torna all'elenco</button>
-                                <button onClick={() => scegli(anteprima.voce, anteprima.prova)} disabled={!!attesa} className="py-3 rounded-xl font-bold bg-[#57534a] text-white hover:bg-[#454138] disabled:opacity-50">Scegli questo quiz</button>
+                                {!soloGuardare(anteprima.voce) && <button onClick={() => scegli(anteprima.voce, anteprima.prova)} disabled={!!attesa} className="py-3 rounded-xl font-bold bg-[#57534a] text-white hover:bg-[#454138] disabled:opacity-50">Scegli questo quiz</button>}
                             </div>
                         </div>
                     ) : elenco === null ? (
@@ -1181,10 +1189,53 @@
                                         </button>
                                         {apertoA && (
                                             <div className="mt-2 ml-3 space-y-2">
+                                                {(() => {
+                                                    const gruppi = [];
+                                                    (a.moduli || []).forEach(m => (m.voci || []).forEach(v => {
+                                                        if (!v.gruppo) return;
+                                                        let g = gruppi.find(x => x.nome === v.gruppo);
+                                                        if (!g) { g = { nome: v.gruppo, voci: [] }; gruppi.push(g); }
+                                                        g.voci.push(v);
+                                                    }));
+                                                    if (!gruppi.length) return null;
+                                                    const apertoV = verAperto === a.anno;
+                                                    return (
+                                                        <div className="border border-[#b9a6d9] rounded-xl overflow-hidden">
+                                                            <button onClick={() => { setVerAperto(apertoV ? null : a.anno); setGruppoAperto(null); }}
+                                                                className="w-full flex items-center justify-between px-4 py-2.5 text-left bg-[#b9a6d9] text-[#2e2540]">
+                                                                <span className="font-bold text-sm">Verifiche</span>
+                                                                <span className="flex items-center gap-2 flex-shrink-0 ml-3">
+                                                                    <span className="text-[11px] font-semibold">{gruppi.length === 1 ? '1 classe' : gruppi.length + ' classi'}</span>
+                                                                    <span className={`transition-transform ${apertoV ? 'rotate-180' : ''}`}><Icon name="chevron" size={16}/></span>
+                                                                </span>
+                                                            </button>
+                                                            {apertoV && (
+                                                                <div className="bg-[#f6f3fb] px-3 py-3 space-y-2 border-t border-[#d9cfea]">
+                                                                    {gruppi.map(g => {
+                                                                        const apertoG = gruppoAperto === g.nome;
+                                                                        return (
+                                                                            <div key={g.nome}>
+                                                                                <button onClick={() => setGruppoAperto(apertoG ? null : g.nome)}
+                                                                                    className="w-full flex items-center justify-between px-3.5 py-2 text-left bg-white border border-[#d9cfea] rounded-lg">
+                                                                                    <span className="font-bold text-sm text-[#4a3d63]">{g.nome}</span>
+                                                                                    <span className="flex items-center gap-2 flex-shrink-0 ml-3 text-[#7a6a96]">
+                                                                                        <span className="text-[11px] font-semibold">{g.voci.length + (g.voci.length === 1 ? ' verifica' : ' verifiche')}</span>
+                                                                                        <span className={`transition-transform ${apertoG ? 'rotate-180' : ''}`}><Icon name="chevron" size={16}/></span>
+                                                                                    </span>
+                                                                                </button>
+                                                                                {apertoG && <div className="mt-2 ml-3 space-y-2">{g.voci.map(rigaVoce)}</div>}
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })()}
                                                 {(a.moduli || []).map(m => {
                                                     const chiave = a.anno + '|' + m.nome;
                                                     const apertoM = moduloAperto === chiave;
-                                                    const voci = m.voci || [];
+                                                    const voci = (m.voci || []).filter(v => !v.gruppo);
                                                     const verifiche = voci.filter(v => v.tipo === 'verifica');
                                                     const quiz = voci.filter(v => v.tipo !== 'verifica');
                                                     return (
@@ -1927,7 +1978,7 @@
                         </Modal>
                     )}
 
-                    {sceltaOpen && <SceltaQuiz cls={cls} onScegli={abbinaProva} onChiudi={() => setSceltaOpen(false)} />}
+                    {sceltaOpen && <SceltaQuiz cls={cls} onScegli={abbinaProva} onChiudi={() => setSceltaOpen(false)} assegnate={Object.values((classData && classData.students) || {}).map(x => x && x.prova).filter(Boolean)} />}
 
                     {quizPin && classData?.students[quizPin] && (() => {
                         const s = classData.students[quizPin], pp = provaDi(classData, s);
@@ -3260,7 +3311,7 @@
                che non fanno in tempo restano nella copia del dispositivo e ripartono dopo il ricarico, stesso gettone).
                Il ricarico e' un F5: l'alunno torna sulla sua prova. Mai al docente, mai su «Accesso bloccato» o
                «Sessione chiusa». Al massimo una volta ogni 10 minuti. */
-            const VERSIONE_APP = '20261001-01';
+            const VERSIONE_APP = '20261018-01';
             const loadingRef = useRef(true);
             useEffect(() => { loadingRef.current = loading; }, [loading]);
             useEffect(() => {
