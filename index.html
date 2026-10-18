@@ -479,7 +479,9 @@
                 offline:   { t: "Non collegato", c: "bg-gray-100 text-gray-500" },
                 locked:    { t: "Bloccato",     c: "bg-[#b4472f]/10 text-[#b4472f]" },
                 submitted: { t: "Consegnato",   c: "bg-[#ebc871]/30 text-[#7a5c14]" },
-                published: { t: "Pubblicato",   c: "bg-[#5c8b73]/15 text-[#3f6a52]" }
+                published: { t: "Pubblicato",   c: "bg-[#5c8b73]/15 text-[#3f6a52]" },
+                assente:   { t: "Assente",      c: "bg-[#b4472f]/10 text-[#b4472f]" },   // (18/10/2026) appello, come in Cedolino
+                noverifica:{ t: "No verifica",  c: "bg-[#b4472f]/10 text-[#b4472f]" }
             };
             const s = map[status] || map.idle;
             return <span className={`text-xs font-bold px-2.5 py-1 rounded-full whitespace-nowrap ${s.c}`}>{s.t}</span>;
@@ -1286,6 +1288,7 @@
             const [undoAllOpen, setUndoAllOpen] = useState(false);
             const [sceltaOpen, setSceltaOpen] = useState(false);   // finestra «Scegli quiz»
             const [quizPin, setQuizPin] = useState(null);          // alunno di cui si sceglie il quiz (clic sul nome)
+            const [appelloPin, setAppelloPin] = useState(null);    // (18/10/2026) appello: clic sul PIN («Assente» / «No verifica» / presente)
             const [quizNuovo, setQuizNuovo] = useState(null);      // { pin, personale } in attesa del «Sì, procedi» (alunno gia' partito)
             const [archiviando, setArchiviando] = useState(false); // (1/10/2026) Reset: i quiz fatti vanno nell'allenamento, i voti pubblicati nello storico
             const [dopoArchivio, setDopoArchivio] = useState(null); // { cosa: 'reset' | 'provaNuova', cls }: il passo dopo, fatto sui dati freschi
@@ -1742,6 +1745,9 @@
 
             const gradingStudent = grading ? classData?.students[grading] : null;
             const counts = students.reduce((acc, s) => { acc[s.status] = (acc[s.status]||0)+1; return acc; }, {});
+            // (18/10/2026) Appello: «Assente» e «No verifica» (students[pin].assente) si contano a parte, sotto «Non iniziati»
+            const assentiCount = students.filter(s => s.status === 'idle' && s.assente === 'assente').length;
+            const noVerificaCount = students.filter(s => s.status === 'idle' && s.assente === 'noverifica').length;
             const playingCount = counts['playing'] || 0;                                   // prove aperte, non ancora consegnate
             const scollegatiCount = students.filter(s => s.status === 'playing' && scollegati[String(s.pin)]).length;
             const alLavoroCount = playingCount - scollegatiCount;                          // di queste, quanti sono collegati adesso
@@ -1809,9 +1815,10 @@
                                 <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4">
                                     {[['idle','Non iniziati'],['playing','In corso'],['locked','Bloccati'],['submitted','Consegnati'],['published','Pubblicati']].map(([k,label]) => (
                                         <div key={k} className="bg-white rounded-xl shadow-card border border-gray-100 px-3 py-2.5 text-center">
-                                            <div className="text-2xl font-extrabold text-[#57534a]">{k === 'playing' ? alLavoroCount : (counts[k]||0)}</div>
+                                            <div className="text-2xl font-extrabold text-[#57534a]">{k === 'playing' ? alLavoroCount : k === 'idle' ? (counts.idle||0) - assentiCount - noVerificaCount : (counts[k]||0)}</div>
                                             <div className="text-[11px] font-semibold text-[#827f75] uppercase tracking-wide">{label}</div>
                                             {k === 'playing' && scollegatiCount > 0 && <div className="text-[11px] font-semibold text-gray-400">+ {scollegatiCount} non collegat{scollegatiCount === 1 ? 'o' : 'i'}</div>}
+                                            {k === 'idle' && (assentiCount + noVerificaCount) > 0 && <div className="text-[11px] font-semibold text-gray-400">{[assentiCount ? '+ ' + assentiCount + (assentiCount === 1 ? ' assente' : ' assenti') : '', noVerificaCount ? '+ ' + noVerificaCount + ' no verifica' : ''].filter(Boolean).join(', ')}</div>}
                                         </div>
                                     ))}
                                 </div>
@@ -1848,11 +1855,13 @@
                                                     const canView = submitted || (playing && !scollegati[String(s.pin)]);   // «Non collegato»: riga nuda, nessun pulsante
                                                     return (
                                                         <tr key={s.pin} className="border-t border-gray-100 hover:bg-gray-50/60">
-                                                            <td className="px-4 py-3 font-mono font-bold text-[#57534a]">{s.pin}</td>
+                                                            <td className="px-4 py-3 font-mono font-bold text-[#57534a]">{s.status === 'idle' && !eProf(s)
+                                                                ? <span onClick={() => setAppelloPin(s.pin)} title={s.assente ? 'Clicca per rimetterlo presente' : 'Clicca per segnarlo assente'} className="cursor-pointer rounded-lg px-1.5 py-0.5 -mx-1.5 -my-0.5 hover:bg-gray-100 hover:text-[#4a3d63]">{s.pin}</span>
+                                                                : s.pin}</td>
                                                             <td onClick={() => setQuizPin(s.pin)} title="Clicca per scegliere il quiz di questo alunno" className="px-4 py-3 font-semibold text-[#262420] whitespace-nowrap cursor-pointer hover:text-[#4a3d63]">{nomeBreve(s.lastName, s.firstName)}{playing && rossi[String(s.pin)] && !scollegati[String(s.pin)] && <span className="dot-fuori" title="Ha abbassato o lasciato la pagina della prova"></span>}{pp && <div title={'Quiz suo: ' + (pp.nome || pp.examTitle)} className="text-[11px] font-semibold text-[#4a3d63] max-w-[10rem] truncate">{pp.nome || pp.examTitle}</div>}</td>
                                                             <td className="px-4 py-3">
                                                                 <div className="flex items-center gap-2">
-                                                                    <StatusBadge status={playing && scollegati[String(s.pin)] ? 'offline' : s.status}/>
+                                                                    <StatusBadge status={playing && scollegati[String(s.pin)] ? 'offline' : (s.status === 'idle' && s.assente ? (s.assente === 'noverifica' ? 'noverifica' : 'assente') : s.status)}/>
                                                                     {playing && !scollegati[String(s.pin)] && <span title="Risposte date finora" className="text-xs font-bold text-[#57534a]">{answeredCount}/{suo.length}</span>}
                                                                 </div>
                                                             </td>
@@ -1979,6 +1988,31 @@
                     )}
 
                     {sceltaOpen && <SceltaQuiz cls={cls} onScegli={abbinaProva} onChiudi={() => setSceltaOpen(false)} assegnate={Object.values((classData && classData.students) || {}).map(x => x && x.prova).filter(Boolean)} />}
+
+                    {appelloPin && classData?.students[appelloPin] && (() => {
+                        // (18/10/2026) APPELLO come in Cedolino Facile, ma sul PIN (qui il nome sceglie il quiz). Di base sono tutti
+                        // presenti; «Assente» e «No verifica» vedono solo l'allenamento anche a classe aperta (ver__modo nel cloud).
+                        // «No verifica» = presente ma oggi non la fa (verifica in due tempi, prova su carta): promemoria per il docente.
+                        const s = classData.students[appelloPin], nome = nomeBreve(s.lastName, s.firstName), ora = s.assente || null;
+                        const segna = (v) => { const cur = classData.students[appelloPin]; if (cur) onSyncUpdate(cls, appelloPin, { ...cur, assente: v }); setAppelloPin(null); };
+                        const chiaro = 'py-3 rounded-xl font-bold border-2 border-[#57534a] text-[#57534a] hover:bg-gray-50';
+                        const scuro = 'py-3 rounded-xl font-bold bg-[#57534a] text-white hover:bg-[#454138]';
+                        return (
+                            <Modal onClose={() => setAppelloPin(null)}>
+                                <h3 className="text-xl font-extrabold text-[#57534a] mb-2">Appello</h3>
+                                <p className="text-sm text-[#57534a] leading-relaxed mb-5">{ora
+                                    ? nome + ' ora risulta «' + (ora === 'noverifica' ? 'No verifica' : 'Assente') + '». Se lo rimetti presente, col suo PIN potrà fare la sua verifica quando la classe è aperta.'
+                                    : 'Come segno ' + nome + '? Assente o No verifica: se entra col suo PIN vede solo l\'allenamento, non la verifica. «No verifica» vuol dire presente ma oggi non la fa: è solo un promemoria per te.'}</p>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <button onClick={() => setAppelloPin(null)} className={chiaro}>Annulla</button>
+                                    {ora && <button onClick={() => segna(ora === 'noverifica' ? 'assente' : 'noverifica')} className={chiaro}>{ora === 'noverifica' ? 'Assente' : 'No verifica'}</button>}
+                                    {ora && <button onClick={() => segna(null)} className={scuro}>Presente</button>}
+                                    {!ora && <button onClick={() => segna('noverifica')} className={scuro}>No verifica</button>}
+                                    {!ora && <button onClick={() => segna('assente')} className={scuro}>Assente</button>}
+                                </div>
+                            </Modal>
+                        );
+                    })()}
 
                     {quizPin && classData?.students[quizPin] && (() => {
                         const s = classData.students[quizPin], pp = provaDi(classData, s);
@@ -3311,7 +3345,7 @@
                che non fanno in tempo restano nella copia del dispositivo e ripartono dopo il ricarico, stesso gettone).
                Il ricarico e' un F5: l'alunno torna sulla sua prova. Mai al docente, mai su «Accesso bloccato» o
                «Sessione chiusa». Al massimo una volta ogni 10 minuti. */
-            const VERSIONE_APP = '20261018-01';
+            const VERSIONE_APP = '20261018-02';
             const loadingRef = useRef(true);
             useEffect(() => { loadingRef.current = loading; }, [loading]);
             useEffect(() => {
