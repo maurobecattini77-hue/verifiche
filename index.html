@@ -167,6 +167,42 @@
             });
             return root.classes;
         };
+        // (19/10/2026) Il cruscotto riceve dal cloud solo cio' che e' cambiato (porta ver_doc_cambi): le liste complete
+        // delle chiavi (classi, alunni, prove) e i pezzi nuovi. Qui si ricompone la scheda di tutti partendo dall'ultima.
+        // Se manca un pezzo (un alunno nell'elenco che non c'era e non e' arrivato) torna null: al giro dopo, tutta.
+        const fondiCambi = (base, cambi) => {
+            const ogg = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
+            if (!ogg(cambi)) return null;
+            if (cambi.doc !== undefined) return (ogg(cambi.doc) && ogg(cambi.doc.classes)) ? cambi.doc.classes : {};
+            if (!ogg(cambi.chiavi)) return null;
+            const classi = ogg(cambi.classi) ? cambi.classi : {}, alunni = ogg(cambi.alunni) ? cambi.alunni : {};
+            const prove = ogg(cambi.prove) ? cambi.prove : {};
+            base = ogg(base) ? base : {};
+            const out = {};
+            for (const c of Object.keys(cambi.chiavi)) {
+                const B = base[c];
+                if (!(c in classi) && B === undefined) return null;
+                const cfg = (c in classi) ? classi[c] : B;
+                if (!ogg(cfg)) { out[c] = cfg; continue; }
+                const N = { ...cfg };
+                const ricomponi = (nome, elenco, nuovi) => {
+                    if (!ogg(N[nome])) return true;
+                    const vecchi = (ogg(B) && ogg(B[nome])) ? B[nome] : {};
+                    const fatto = {};
+                    for (const k of (Array.isArray(elenco) ? elenco : [])) {
+                        if (ogg(nuovi) && k in nuovi) fatto[k] = nuovi[k];
+                        else if (k in vecchi) fatto[k] = vecchi[k];
+                        else return false;
+                    }
+                    N[nome] = fatto;
+                    return true;
+                };
+                const ch = ogg(cambi.chiavi[c]) ? cambi.chiavi[c] : {};
+                if (!ricomponi('students', ch.s, alunni[c]) || !ricomponi('prove', ch.p, prove[c])) return null;
+                out[c] = N;
+            }
+            return out;
+        };
         const chiaveOp = (op) => JSON.stringify(op.p);
 
         /* LE PORTE DELL'ALUNNO (19/09/2026). L'alunno non legge e non scrive piu' la scheda di tutti (app_state):
@@ -2730,6 +2766,10 @@
                Dal 19/09/2026 la scheda di tutti la legge e la scrive SOLO il docente riconosciuto dal cloud
                (porte ver_doc_leggi e ver_applica, che controllano cf_e_docente). */
             const classesRef = useRef({});     // l'ultima fotografia locale (cloud + cio' che ho scritto io)
+            const cloudRef = useRef(null);     // (19/10/2026) l'ultima scheda ricomposta dal cloud, senza le mie scritture sopra
+            const dopoRef = useRef(null);      // l'«ora» del cloud dell'ultima lettura: al giro dopo si chiede cio' che e' cambiato
+            const giroRef = useRef(0);         // numero dell'ultima lettura partita
+            const applicatoRef = useRef(0);    // numero dell'ultima lettura usata
             const codaRef = useRef([]);        // pezzetti da spedire
             const voloRef = useRef([]);        // pezzetti spediti, in attesa di conferma
             const fatteRef = useRef([]);       // pezzetti confermati da poco: { op, doneAt }
@@ -2746,10 +2786,21 @@
 
             const pullCloudState = async () => {
                 const t0 = Date.now();
-                const { data, error } = await supabase.rpc('ver_doc_leggi');
+                // (19/10/2026) Si chiede solo cio' che e' cambiato dall'ultima lettura (porta ver_doc_cambi): prima arrivava
+                // ogni 3 secondi la scheda di tutti (575 KB). Alla prima lettura, ogni 40 giri (2 minuti) e quando manca un
+                // pezzo, la scheda intera. Una lettura che arriva dopo una piu' nuova si butta.
+                const mio = ++giroRef.current;
+                const intera = dopoRef.current === null || cloudRef.current === null || mio % 40 === 0;
+                const { data, error } = await supabase.rpc('ver_doc_cambi', { p_dopo: intera ? null : dopoRef.current });
                 if (viewRef.current !== 'admin') return;
                 if (!error && data) {
-                    let classes = (data && data.classes) || {};
+                    if (mio < applicatoRef.current) return;
+                    const fusa = fondiCambi(intera ? {} : cloudRef.current, data);
+                    if (!fusa) { dopoRef.current = null; return; }
+                    applicatoRef.current = mio;
+                    cloudRef.current = fusa;
+                    dopoRef.current = (typeof data.ora === 'number') ? data.ora : null;
+                    let classes = JSON.parse(JSON.stringify(fusa));
                     // Una lettura partita PRIMA che una mia scrittura fosse confermata puo' non contenerla ancora:
                     // gliela rimetto sopra. Le scritture confermate prima che questa lettura partisse ci sono gia' dentro.
                     fatteRef.current = fatteRef.current.filter(x => x.doneAt > t0);
@@ -3345,7 +3396,7 @@
                che non fanno in tempo restano nella copia del dispositivo e ripartono dopo il ricarico, stesso gettone).
                Il ricarico e' un F5: l'alunno torna sulla sua prova. Mai al docente, mai su «Accesso bloccato» o
                «Sessione chiusa». Al massimo una volta ogni 10 minuti. */
-            const VERSIONE_APP = '20261018-03';
+            const VERSIONE_APP = '20261019-01';
             const loadingRef = useRef(true);
             useEffect(() => { loadingRef.current = loading; }, [loading]);
             useEffect(() => {
