@@ -346,6 +346,9 @@
             return opens.every(q => student.openGrades && student.openGrades[q.id] && student.openGrades[q.id].score != null);
         };
 
+        // (24/10/2026) Voto sospeso: c'e' almeno un'aperta e non tutte hanno il punteggio del docente (vedi ReviewExam).
+        const votoSospeso = (student, questions) => (questions || []).some(q => q.type === 'open') && !allOpenGraded(student || {}, questions || []);
+
         // Numero di quesiti aperti
         const countOpen = (questions) => questions.filter(q => q.type === 'open').length;
 
@@ -876,6 +879,9 @@
             const answeredCount = questions.filter(q => isAnswered(q, student)).length;
             const hasClosed = bd.closedMax > 0;
             const hasOpen = bd.openMax > 0;
+            // (24/10/2026) Mauro: se c'e' anche una sola aperta non ancora corretta, niente voto (non avrebbe significato):
+            // solo i punti delle chiuse. Il voto compare quando tutte le aperte hanno il punteggio del docente.
+            const sospeso = votoSospeso(student, questions);
 
             return (
                 <div>
@@ -884,7 +890,13 @@
                             <div className="text-xs font-bold text-gray-400 uppercase tracking-widest">Classe {cls} · PIN {student.pin}</div>
                             <h3 className="text-xl font-extrabold text-[#57534a]">{student.lastName} {student.firstName}</h3>
                         </div>
-                        {reveal ? (
+                        {reveal && sospeso ? (
+                            <div className="text-center max-w-[11rem]">
+                                <div className="text-[10px] uppercase tracking-widest text-[#827f75] mb-0.5">Domande chiuse</div>
+                                <div className="text-3xl font-extrabold leading-none tracking-tight text-[#57534a]">{fmtN(bd.closedScore)}<span className="text-base font-bold text-[#827f75]"> su {fmtN(bd.closedMax)}</span></div>
+                                <div className="mt-1.5 text-xs font-semibold text-[#827f75] leading-snug">Il voto arriva dopo la correzione delle domande aperte</div>
+                            </div>
+                        ) : reveal ? (
                             <div className="text-center">
                                 <div className="text-[10px] uppercase tracking-widest text-[#827f75] mb-0.5">Esito</div>
                                 <div className={`text-5xl font-extrabold leading-none tracking-tight ${passed ? 'text-[#5c8b73]' : 'text-[#b4472f]'}`}>{percent}%</div>
@@ -901,8 +913,8 @@
                     {reveal && (
                         <div className="flex flex-wrap gap-2 mb-4 text-xs font-semibold">
                             {hasClosed && <span className="bg-gray-100 rounded-lg px-3 py-1.5 text-[#57534a]">Chiuse {fmtN(bd.closedScore)}/{fmtN(bd.closedMax)}</span>}
-                            {hasOpen && <span className="bg-[#b9a6d9]/25 rounded-lg px-3 py-1.5 text-[#5e4e70]">Aperte {fmtN(bd.openScore)}/{fmtN(bd.openMax)}</span>}
-                            <span className="bg-[#57534a] text-white rounded-lg px-3 py-1.5">Totale {fmtN(total)}/{fmtN(bd.totalMax)}</span>
+                            {hasOpen && <span className="bg-[#b9a6d9]/25 rounded-lg px-3 py-1.5 text-[#5e4e70]">{sospeso ? 'Aperte da correggere' : `Aperte ${fmtN(bd.openScore)}/${fmtN(bd.openMax)}`}</span>}
+                            {!sospeso && <span className="bg-[#57534a] text-white rounded-lg px-3 py-1.5">Totale {fmtN(total)}/{fmtN(bd.totalMax)}</span>}
                         </div>
                     )}
 
@@ -914,7 +926,7 @@
                             const isOpen = q.type === 'open';
                             let border, badgeClass, badgeText;
                             if (isOpen) {
-                                border = "border-[#b9a6d9]"; badgeClass = "bg-[#b9a6d9]/25 text-[#5e4e70]"; badgeText = reveal ? `${fmtN(pts)}/${fmtN(q.points)} pt` : "APERTA";
+                                border = "border-[#b9a6d9]"; badgeClass = "bg-[#b9a6d9]/25 text-[#5e4e70]"; badgeText = reveal ? (student.openGrades && student.openGrades[q.id] && student.openGrades[q.id].score != null ? `${fmtN(pts)}/${fmtN(q.points)} pt` : "DA CORREGGERE") : "APERTA";
                             } else if (!reveal) {
                                 border = answered ? "border-[#57534a]" : "border-gray-300";
                                 badgeClass = answered ? "bg-[#aec8ce]/40 text-[#57534a]" : "bg-gray-200 text-gray-600";
@@ -2553,7 +2565,8 @@
             try { const d = new Date(typeof x === 'number' ? x : String(x)); return isNaN(d.getTime()) ? '' : d.toLocaleDateString('it-IT', { day: 'numeric', month: 'long' }); }
             catch (e) { return ''; }
         };
-        const votoDi = (scheda, domande) => { const bd = computeBreakdown(scheda || {}, domande || []); return { voto: votoFromPercent(bd.percent), ok: bd.percent >= SOGLIA_SUFFICIENZA }; };
+        const votoDi = (scheda, domande) => { const bd = computeBreakdown(scheda || {}, domande || []); return { voto: votoFromPercent(bd.percent), ok: bd.percent >= SOGLIA_SUFFICIENZA,
+            sospeso: votoSospeso(scheda, domande), chiuse: fmtN(bd.closedScore) + ' su ' + fmtN(bd.closedMax) }; };   // (24/10/2026) voto sospeso
         // Il segno di una domanda chiusa: le stesse parole della correzione della prova, senza punti.
         const segnoDi = (q, st) => {
             if (!isAnswered(q, st)) return { t: 'NON RISPOSTA', c: 'bg-gray-200 text-gray-600', b: 'border-gray-300' };
@@ -2754,7 +2767,7 @@
                 const v = votoDi(h.scheda, domande[h.impronta]);
                 return (
                     <div key={h.id} className="flex items-center justify-between gap-3 bg-gray-50 rounded-xl px-3 py-2">
-                        <div className="text-sm text-[#57534a] min-w-0">{etichetta} <span className="text-gray-400">·</span> voto <b className={v.ok ? 'text-[#5c8b73]' : 'text-[#b4472f]'}>{v.voto}</b></div>
+                        <div className="text-sm text-[#57534a] min-w-0">{etichetta} <span className="text-gray-400">·</span> {v.sospeso ? <span>chiuse <b>{v.chiuse}</b> <span className="text-gray-400">·</span> il voto arriva dopo la correzione delle aperte</span> : <span>voto <b className={v.ok ? 'text-[#5c8b73]' : 'text-[#b4472f]'}>{v.voto}</b></span>}</div>
                         {bottoneCorrezione(() => correzione(h.scheda, h.impronta))}
                     </div>
                 );
@@ -2766,7 +2779,7 @@
                 let riga, apri = null;
                 if (stato === 'published') {
                     const v = votoDi(s, att.questions);
-                    riga = <span>Voto <b className={v.ok ? 'text-[#5c8b73]' : 'text-[#b4472f]'}>{v.voto}</b></span>;
+                    riga = v.sospeso ? <span>Domande chiuse <b>{v.chiuse}</b> · il voto arriva dopo la correzione delle aperte</span> : <span>Voto <b className={v.ok ? 'text-[#5c8b73]' : 'text-[#b4472f]'}>{v.voto}</b></span>;
                     apri = () => setAperto({ cosa: 'correzione', scheda: s, domande: att.questions || [], cls: att.cls });
                 } else if (stato === 'submitted') riga = 'Consegnata · in attesa del voto';
                 else riga = 'Si riprende in classe';
@@ -2810,11 +2823,19 @@
                                                     <div className="min-w-0">
                                                         <div className="font-extrabold text-[#57534a]">Verifica del {dataBreve(h.consegnato || h.chiuso_il)}</div>
                                                         {h.titolo && <div className="text-sm text-[#827f75] leading-snug mt-0.5">{h.titolo}</div>}
+                                                        {v.sospeso && <div className="text-sm text-[#827f75] leading-snug mt-1">Il voto arriva dopo la correzione delle domande aperte.</div>}
                                                     </div>
+                                                    {v.sospeso ? (
+                                                    <div className="text-center flex-shrink-0">
+                                                        <div className="text-[10px] uppercase tracking-widest text-[#827f75]">Chiuse</div>
+                                                        <div className="text-xl font-extrabold leading-none text-[#57534a] whitespace-nowrap">{v.chiuse}</div>
+                                                    </div>
+                                                    ) : (
                                                     <div className="text-center flex-shrink-0">
                                                         <div className="text-[10px] uppercase tracking-widest text-[#827f75]">Voto</div>
                                                         <div className={`text-3xl font-extrabold leading-none ${v.ok ? 'text-[#5c8b73]' : 'text-[#b4472f]'}`}>{v.voto}</div>
                                                     </div>
+                                                    )}
                                                 </div>
                                                 <div className="mt-3 flex justify-end">{bottoneCorrezione(() => correzione(h.scheda, h.impronta))}</div>
                                             </div>
@@ -3520,7 +3541,7 @@
                che non fanno in tempo restano nella copia del dispositivo e ripartono dopo il ricarico, stesso gettone).
                Il ricarico e' un F5: l'alunno torna sulla sua prova. Mai al docente, mai su «Accesso bloccato» o
                «Sessione chiusa». Al massimo una volta ogni 10 minuti. */
-            const VERSIONE_APP = '20261024-05';
+            const VERSIONE_APP = '20261024-06';
             const loadingRef = useRef(true);
             useEffect(() => { loadingRef.current = loading; }, [loading]);
             useEffect(() => {
