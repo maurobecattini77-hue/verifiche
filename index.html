@@ -2174,7 +2174,10 @@
                 opens.forEach(q => {
                     const g = student.openGrades && student.openGrades[q.id];
                     init[q.id] = { score: (g && g.score != null) ? g.score : 0, comment: (g && g.comment) || "" };
-                    if (g && g.griglia) init[q.id].griglia = { ...g.griglia };   // (24/10/2026) griglia delle aperte
+                    // (24/10/2026) griglia delle aperte: quella salvata; per un'aperta da 5 punti ancora senza voto parte da zero.
+                    // Un'aperta gia' corretta senza griglia (prima del 24/10) resta col numero solo, per non perdere il suo voto.
+                    if (g && g.griglia) init[q.id].griglia = { ...g.griglia };
+                    else if (grigliaUsabile(q) && !(g && Number(g.score) > 0)) { const gr = {}; GRIGLIA_APERTE.forEach(v => { gr[v.k] = 0; }); init[q.id].griglia = gr; }
                 });
                 return init;
             });
@@ -2182,15 +2185,12 @@
                 let n = v === '' ? 0 : parseFloat(v); if (isNaN(n)) n = 0; n = Math.max(0, Math.min(max, n));
                 setGrades(p => ({ ...p, [qid]: { ...p[qid], score: n } }));
             };
-            // (24/10/2026) Con la griglia il punteggio dell'aperta e' la somma delle quattro voci; «Togli la griglia» torna al numero solo.
+            // (24/10/2026) Con la griglia il punteggio dell'aperta e' la somma delle quattro voci; «Vedi griglia» la apre, la X la chiude.
             const [grigliaAperta, setGrigliaAperta] = useState(null);
             const setVoce = (qid, k, max, v) => {
                 let n = v === '' ? 0 : parseFloat(v); if (isNaN(n)) n = 0; n = Math.max(0, Math.min(max, n));
                 setGrades(p => { const gr = { ...(p[qid].griglia || {}), [k]: n }; return { ...p, [qid]: { ...p[qid], griglia: gr, score: grigliaTotale(gr) } }; });
             };
-            const [primaDellaGriglia, setPrimaDellaGriglia] = useState({});   // il punteggio di prima, se la griglia si toglie subito
-            const usaGriglia = (qid) => { setPrimaDellaGriglia(p => ({ ...p, [qid]: grades[qid] ? grades[qid].score : 0 })); setGrades(p => { const gr = {}; GRIGLIA_APERTE.forEach(v => { gr[v.k] = 0; }); return { ...p, [qid]: { ...p[qid], griglia: gr, score: 0 } }; }); };
-            const togliGriglia = (qid) => setGrades(p => { const { griglia, ...resto } = p[qid]; if (primaDellaGriglia[qid] != null) resto.score = primaDellaGriglia[qid]; return { ...p, [qid]: resto }; });
             const setComment = (qid, c) => setGrades(p => ({ ...p, [qid]: { ...p[qid], comment: c } }));
             const totalOpen = opens.reduce((t, q) => t + (grades[q.id] ? grades[q.id].score : 0), 0);
             const maxOpenAll = opens.reduce((t, q) => t + q.points, 0);
@@ -2249,7 +2249,6 @@
                                             <div className="flex items-center gap-3 flex-wrap">
                                                 <span className="text-sm font-bold text-[#57534a]">Punteggio {fmtN(grades[q.id].score)} <span className="font-normal text-[#827f75]">/ {fmtN(q.points)} punti</span></span>
                                                 <button onClick={() => setGrigliaAperta(q.id)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-gray-100 text-[#57534a] hover:bg-gray-200">Vedi griglia</button>
-                                                <button onClick={() => togliGriglia(q.id)} className="px-3 py-1.5 rounded-lg text-xs font-bold text-[#827f75] hover:bg-gray-100">Togli la griglia</button>
                                             </div>
                                         </div>
                                     ) : (
@@ -2259,7 +2258,6 @@
                                             onChange={(e) => setScore(q.id, q.points, e.target.value)}
                                             className="w-24 p-2 rounded-lg border-2 border-gray-200 focus:border-[#57534a] outline-none text-center font-bold"/>
                                         <span className="text-sm text-[#827f75]">/ {fmtN(q.points)} punti</span>
-                                        {grigliaUsabile(q) && <button onClick={() => usaGriglia(q.id)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-gray-100 text-[#57534a] hover:bg-gray-200">Usa la griglia</button>}
                                     </div>
                                     )}
                                     <div className="text-xs font-bold text-[#57534a] uppercase mb-1">Commento del docente</div>
@@ -3522,7 +3520,7 @@
                che non fanno in tempo restano nella copia del dispositivo e ripartono dopo il ricarico, stesso gettone).
                Il ricarico e' un F5: l'alunno torna sulla sua prova. Mai al docente, mai su «Accesso bloccato» o
                «Sessione chiusa». Al massimo una volta ogni 10 minuti. */
-            const VERSIONE_APP = '20261024-04';
+            const VERSIONE_APP = '20261024-05';
             const loadingRef = useRef(true);
             useEffect(() => { loadingRef.current = loading; }, [loading]);
             useEffect(() => {
