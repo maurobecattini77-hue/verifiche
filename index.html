@@ -682,24 +682,24 @@
 
         // (24/10/2026) GRIGLIA DELLE APERTE da 5 punti, voluta da Mauro: quattro voci con le SUE fasce (conoscenze da 0 a 0,5,
         // da 0,5 a 1, da 1 a 1,5, da 1,5 a 2; le altre da 0 a 0,5 e da 0,5 a 1), ognuna col giudizio e il descrittore come nelle
-        // griglie ministeriali. I punti sono liberi (anche 0,8 o 1,6): stanno in openGrades[qid].griglia = { conoscenze,
+        // griglie ministeriali, senza giudizi (bocciati: solo la fascia). I punti sono liberi (anche 0,8 o 1,6): stanno in openGrades[qid].griglia = { conoscenze,
         // competenze, linguaggio, riflessioni } e il punteggio dell'aperta e' la loro somma. Un punto che cade sul confine va
-        // nella fascia piu' alta (0,5 = «da 0,5 a 1»); il massimo sta nell'ultima. Fascia = [da, a, giudizio, descrittore].
+        // nella fascia piu' alta (0,5 = «da 0,5 a 1»); il massimo sta nell'ultima. Fascia = [da, a, descrittore] (niente giudizi: solo la fascia).
         const GRIGLIA_APERTE = [
             { k: 'conoscenze', t: 'Conoscenze', max: 2, fasce: [
-                [0, 0.5, 'Gravemente insufficiente', 'Conoscenze assenti o frammentarie, con errori gravi sui concetti fondamentali.'],
-                [0.5, 1, 'Insufficiente', 'Conoscenze parziali e superficiali: i concetti fondamentali sono presenti solo in parte o in modo impreciso.'],
-                [1, 1.5, 'Da sufficiente a discreto', 'Conoscenze corrette nei contenuti essenziali, con qualche lacuna o imprecisione.'],
-                [1.5, 2, 'Da buono a ottimo', 'Conoscenze complete, precise e approfondite, sicure anche nei collegamenti tra i concetti.'] ] },
+                [0, 0.5, 'Conoscenze assenti o frammentarie, con errori gravi sui concetti fondamentali.'],
+                [0.5, 1, 'Conoscenze parziali e superficiali: i concetti fondamentali sono presenti solo in parte o in modo impreciso.'],
+                [1, 1.5, 'Conoscenze corrette nei contenuti essenziali, con qualche lacuna o imprecisione.'],
+                [1.5, 2, 'Conoscenze complete, precise e approfondite, sicure anche nei collegamenti tra i concetti.'] ] },
             { k: 'competenze', t: 'Competenze', max: 1, fasce: [
-                [0, 0.5, 'Insufficiente', 'Risposta poco pertinente alla richiesta: le conoscenze non vengono applicate, o sono applicate in modo scorretto.'],
-                [0.5, 1, 'Da sufficiente a ottimo', 'Risponde in modo pertinente alla richiesta e applica correttamente le conoscenze, fino a utilizzarle con autonomia, esempi efficaci e collegamenti personali.'] ] },
+                [0, 0.5, 'Risposta poco pertinente alla richiesta: le conoscenze non vengono applicate, o sono applicate in modo scorretto.'],
+                [0.5, 1, 'Risponde in modo pertinente alla richiesta e applica correttamente le conoscenze, fino a utilizzarle con autonomia, esempi efficaci e collegamenti personali.'] ] },
             { k: 'linguaggio', t: 'Proprietà di linguaggio e lessico specifico', max: 1, fasce: [
-                [0, 0.5, 'Insufficiente', 'Esposizione confusa o disordinata; lessico generico, povero o improprio.'],
-                [0.5, 1, 'Da sufficiente a ottimo', 'Esposizione chiara e lessico appropriato, fino a un uso sicuro, preciso ed efficace del linguaggio specifico della disciplina.'] ] },
+                [0, 0.5, 'Esposizione confusa o disordinata; lessico generico, povero o improprio.'],
+                [0.5, 1, 'Esposizione chiara e lessico appropriato, fino a un uso sicuro, preciso ed efficace del linguaggio specifico della disciplina.'] ] },
             { k: 'riflessioni', t: 'Riflessioni personali', max: 1, fasce: [
-                [0, 0.5, 'Insufficiente', 'Riflessioni assenti, appena accennate o prive di motivazione.'],
-                [0.5, 1, 'Da sufficiente a ottimo', 'Riflessioni personali pertinenti e motivate, fino a risultare approfondite, originali ed equilibrate.'] ] }
+                [0, 0.5, 'Riflessioni assenti, appena accennate o prive di motivazione.'],
+                [0.5, 1, 'Riflessioni personali pertinenti e motivate, fino a risultare approfondite, originali ed equilibrate.'] ] }
         ];
         const grigliaUsabile = (q) => !!q && q.type === 'open' && Number(q.points) === 5;
         const grigliaTotale = (gr) => Math.round(GRIGLIA_APERTE.reduce((t, v) => t + (Number(gr && gr[v.k]) || 0), 0) * 100) / 100;
@@ -719,7 +719,7 @@
                         <thead>
                             <tr className="text-left text-[11px] uppercase tracking-wider text-[#827f75]">
                                 <th className="py-2 pr-2 font-semibold w-20 sm:w-24">Fascia</th>
-                                <th className="py-2 pr-2 font-semibold">Giudizio e descrittore</th>
+                                <th className="py-2 pr-2 font-semibold">Descrittore</th>
                                 <th className="py-2 font-semibold text-right w-14 sm:w-20">Punti</th>
                             </tr>
                         </thead>
@@ -738,8 +738,7 @@
                                             <tr key={i} className={`border-b border-gray-100 align-top ${e ? 'bg-[#aec8ce]/25' : ''}`}>
                                                 <td className={`py-2 pl-2 pr-2 whitespace-nowrap ${e ? 'text-[#262420] font-semibold' : 'text-[#827f75]'}`}>{fasciaTesto(f)}</td>
                                                 <td className="py-2 pr-2">
-                                                    <div className={`font-semibold ${e ? 'text-[#262420]' : 'text-[#57534a]'}`}>{f[2]}</div>
-                                                    <div className={`leading-snug ${e ? 'text-[#262420]' : 'text-[#827f75]'}`}>{f[3]}</div>
+                                                    <div className={`leading-snug ${e ? 'text-[#262420]' : 'text-[#827f75]'}`}>{f[2]}</div>
                                                     {e && <div className="mt-1.5 text-[#57534a] font-semibold">Punteggio assegnato: {fmtN(val)} su {fmtN(v.max)}</div>}
                                                 </td>
                                                 <td className={`py-2 pr-2 text-right whitespace-nowrap ${e ? 'font-extrabold text-[#57534a]' : ''}`}>{e ? fmtN(val) : ''}</td>
@@ -2439,7 +2438,7 @@
                         <div>
                             <div className="bg-gray-50 rounded-xl p-4 text-sm whitespace-pre-wrap leading-relaxed text-[#262420]">{txt||"—"}</div>
                             {g&&g.comment?<div className="bg-[#aec8ce]/20 rounded-xl p-4 text-sm mt-3"><div className="text-xs font-bold text-[#57534a] uppercase mb-1">Commento del docente</div><div className="text-[#262420] leading-relaxed whitespace-pre-wrap">{g.comment}</div></div>:null}
-                            {g&&g.griglia&&D.GRIGLIA?<details className="mt-3 border border-gray-200 rounded-xl p-3 text-sm"><summary className="cursor-pointer font-bold text-[#57534a]">Vedi griglia di valutazione</summary><table className="w-full mt-3 border-collapse">{D.GRIGLIA.map(function(v){ var val=g.griglia[v.k]; var n=Number(val)||0; var qui=0; v.fasce.forEach(function(f,k){ if(n>=f[0]-1e-9) qui=k; }); return <tbody key={v.k}><tr><td colSpan={3} className="pt-3 pb-1 border-b-2 border-gray-200"><span className="font-bold text-[#262420]">{v.t}</span> <span className="text-[#827f75]">· da 0 a {fmtN(v.max)} {v.max === 1 ? 'punto' : 'punti'}</span></td></tr>{v.fasce.map(function(f,i){return i;}).reverse().map(function(i){ var f=v.fasce[i]; var e=i===qui; return <tr key={i} className={"border-b border-gray-100 align-top "+(e?"bg-[#aec8ce]/25":"")}><td className={"py-1.5 px-2 whitespace-nowrap "+(e?"font-semibold text-[#262420]":"text-[#827f75]")}>{"da "+fmtN(f[0])+" a "+fmtN(f[1])}</td><td className="py-1.5 pr-2"><div className="font-semibold text-[#57534a]">{f[2]}</div><div className={e?"text-[#262420]":"text-[#827f75]"}>{f[3]}</div>{e?<div className="mt-1 font-semibold text-[#57534a]">{"Punteggio assegnato: "+fmtN(val)+" su "+fmtN(v.max)}</div>:null}</td><td className="py-1.5 pr-2 text-right font-bold text-[#57534a]">{e?fmtN(val):""}</td></tr>; })}</tbody>; })}</table></details>:null}
+                            {g&&g.griglia&&D.GRIGLIA?<details className="mt-3 border border-gray-200 rounded-xl p-3 text-sm"><summary className="cursor-pointer font-bold text-[#57534a]">Vedi griglia di valutazione</summary><table className="w-full mt-3 border-collapse">{D.GRIGLIA.map(function(v){ var val=g.griglia[v.k]; var n=Number(val)||0; var qui=0; v.fasce.forEach(function(f,k){ if(n>=f[0]-1e-9) qui=k; }); return <tbody key={v.k}><tr><td colSpan={3} className="pt-3 pb-1 border-b-2 border-gray-200"><span className="font-bold text-[#262420]">{v.t}</span> <span className="text-[#827f75]">· da 0 a {fmtN(v.max)} {v.max === 1 ? 'punto' : 'punti'}</span></td></tr>{v.fasce.map(function(f,i){return i;}).reverse().map(function(i){ var f=v.fasce[i]; var e=i===qui; return <tr key={i} className={"border-b border-gray-100 align-top "+(e?"bg-[#aec8ce]/25":"")}><td className={"py-1.5 px-2 whitespace-nowrap "+(e?"font-semibold text-[#262420]":"text-[#827f75]")}>{"da "+fmtN(f[0])+" a "+fmtN(f[1])}</td><td className="py-1.5 pr-2"><div className={e?"text-[#262420]":"text-[#827f75]"}>{f[2]}</div>{e?<div className="mt-1 font-semibold text-[#57534a]">{"Punteggio assegnato: "+fmtN(val)+" su "+fmtN(v.max)}</div>:null}</td><td className="py-1.5 pr-2 text-right font-bold text-[#57534a]">{e?fmtN(val):""}</td></tr>; })}</tbody>; })}</table></details>:null}
                         </div>
                     );
                 }
@@ -3520,7 +3519,7 @@
                che non fanno in tempo restano nella copia del dispositivo e ripartono dopo il ricarico, stesso gettone).
                Il ricarico e' un F5: l'alunno torna sulla sua prova. Mai al docente, mai su «Accesso bloccato» o
                «Sessione chiusa». Al massimo una volta ogni 10 minuti. */
-            const VERSIONE_APP = '20261024-02';
+            const VERSIONE_APP = '20261024-03';
             const loadingRef = useRef(true);
             useEffect(() => { loadingRef.current = loading; }, [loading]);
             useEffect(() => {
