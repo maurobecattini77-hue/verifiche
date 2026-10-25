@@ -105,8 +105,14 @@
 
         // Il riconoscimento del docente sta nella memoria DELLA SCHEDA (sessionStorage): resiste a un F5, ma chiusa la
         // scheda non c'e' piu' e alla prossima apertura la password si ridigita, come in Cedolino Facile.
+        // (25/10/2026) Richiesta di Mauro: quando lui e' entrato con la password, Claude deve poter lavorare dalle sue schede.
+        // Il riconoscimento del docente sta nella memoria lunga del browser (come Cedolino Facile), sotto la sua chiave:
+        // «Accesso docente» chiede SEMPRE email e password (regola del 19/09) e dopo F5 si resta nel cruscotto col segno
+        // della scheda. Le schede aperte con la versione di prima lo avevano nella memoria della scheda: lo sposto, cosi'
+        // l'aggiornamento non le butta fuori.
+        try { const vecchio = sessionStorage.getItem('ver-docente-auth'); if (vecchio && !localStorage.getItem('ver-docente-auth')) localStorage.setItem('ver-docente-auth', vecchio); sessionStorage.removeItem('ver-docente-auth'); } catch (e) { }
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-            auth: { storage: window.sessionStorage, storageKey: 'ver-docente-auth', persistSession: true, autoRefreshToken: true }
+            auth: { storage: window.localStorage, storageKey: 'ver-docente-auth', persistSession: true, autoRefreshToken: true }
         });
         const DOCENTE_KEY = 'ver_docente_attivo';
 
@@ -3622,7 +3628,7 @@
                che non fanno in tempo restano nella copia del dispositivo e ripartono dopo il ricarico, stesso gettone).
                Il ricarico e' un F5: l'alunno torna sulla sua prova. Mai al docente, mai su «Accesso bloccato» o
                «Sessione chiusa». Al massimo una volta ogni 10 minuti. */
-            const VERSIONE_APP = '20261025-01';
+            const VERSIONE_APP = '20261025-02';
             const loadingRef = useRef(true);
             useEffect(() => { loadingRef.current = loading; }, [loading]);
             useEffect(() => {
