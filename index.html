@@ -2991,10 +2991,12 @@
             const pullCloudState = async () => {
                 const t0 = Date.now();
                 // (19/10/2026) Si chiede solo cio' che e' cambiato dall'ultima lettura (porta ver_doc_cambi): prima arrivava
-                // ogni 3 secondi la scheda di tutti (575 KB). Alla prima lettura, ogni 40 giri (2 minuti) e quando manca un
+                // ogni 3 secondi la scheda di tutti (575 KB). Alla prima lettura, ogni 200 giri (10 minuti) e quando manca un
                 // pezzo, la scheda intera. Una lettura che arriva dopo una piu' nuova si butta.
+                // (25/10/2026) La scheda intera ogni 10 minuti invece che ogni 2: i cambi portano gia' l'elenco completo di
+                // classi, alunni e prove (anche le cancellazioni), quindi e' solo una rete di sicurezza. Traffico: -80%.
                 const mio = ++giroRef.current;
-                const intera = dopoRef.current === null || cloudRef.current === null || mio % 40 === 0;
+                const intera = dopoRef.current === null || cloudRef.current === null || mio % 200 === 0;
                 const { data, error } = await supabase.rpc('ver_doc_cambi', { p_dopo: intera ? null : dopoRef.current });
                 if (viewRef.current !== 'admin') return;
                 if (!error && data) {
@@ -3298,7 +3300,8 @@
             };
 
             /* (25/10/2026) TEMPI DI SCRITTURA DELLE APERTE (vedi annotaDiario): un diario per alunno e per ingresso col PIN,
-               spedito intero al massimo ogni 10 secondi, quando la pagina va dietro o si chiude, e con la consegna. */
+               spedito intero al massimo ogni 60 secondi (prima 10: limiti dei registri di Supabase), quando la pagina va
+               dietro o si chiude, e con la consegna. */
             const diarioRef = useRef({ pin: null, sess: null, pezzo: null, disp: null, q: {}, cambiato: false });
             const diarioTimerRef = useRef(null);
             const spedisciScrittura = (subito) => {
@@ -3318,7 +3321,7 @@
                 const dd = diarioRef.current;
                 dd.q[qid] = annotaDiario(dd.q[qid], ev, dd.disp === 'tocco', Date.now());
                 dd.cambiato = true;
-                if (!diarioTimerRef.current) diarioTimerRef.current = setTimeout(() => { diarioTimerRef.current = null; spedisciScrittura(false); }, 10000);
+                if (!diarioTimerRef.current) diarioTimerRef.current = setTimeout(() => { diarioTimerRef.current = null; spedisciScrittura(false); }, 60000);
             };
 
             // La consegna porta con se' TUTTE le risposte che ho sullo schermo: cosi' l'ultima lettera non resta per strada.
@@ -3640,7 +3643,7 @@
                che non fanno in tempo restano nella copia del dispositivo e ripartono dopo il ricarico, stesso gettone).
                Il ricarico e' un F5: l'alunno torna sulla sua prova. Mai al docente, mai su «Accesso bloccato» o
                «Sessione chiusa». Al massimo una volta ogni 10 minuti. */
-            const VERSIONE_APP = '20261025-03';
+            const VERSIONE_APP = '20261025-04';
             const loadingRef = useRef(true);
             useEffect(() => { loadingRef.current = loading; }, [loading]);
             useEffect(() => {
