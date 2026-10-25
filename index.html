@@ -572,27 +572,80 @@
             );
         };
 
-        const OpenAnswer = ({ value, onChange, locked, maxLength = 400 }) => {
+        /* TEMPI DI SCRITTURA DELLE APERTE (25/10/2026, chiesto da Mauro: «se scrivono tasto per tasto ci vuole tempo, se
+           incollano entra tutto insieme»). Per ogni aperta la pagina annota COME entra il testo: lettere una alla volta
+           (scritte a mano), parole intere in un colpo (normali sul telefono: suggerimenti e scrittura a scorrimento della
+           tastiera), piu' parole in un colpo (incolla o dettatura a voce; al computer anche un pezzo di 3 lettere) e i
+           tentativi di incollare respinti. Va al cloud a parte (ver_scrittura), una riga per apertura della pagina:
+           risposte, consegna e voto non ne dipendono, e se la porta non risponde l'alunno non se ne accorge. */
+        const differenzaTesto = (prima, dopo) => {
+            const max = Math.min(prima.length, dopo.length);
+            let i = 0;
+            while (i < max && prima.charCodeAt(i) === dopo.charCodeAt(i)) i++;
+            let j = 0;
+            while (j < max - i && prima.charCodeAt(prima.length - 1 - j) === dopo.charCodeAt(dopo.length - 1 - j)) j++;
+            return { tolti: prima.length - i - j, messo: dopo.slice(i, dopo.length - j) };
+        };
+        const schermoATocco = () => {
+            try { return window.matchMedia('(pointer: coarse)').matches || (navigator.maxTouchPoints > 1 && !window.matchMedia('(any-pointer: fine)').matches); } catch (e) { return false; }
+        };
+        // d = il diario di una domanda (o undefined la prima volta); ev = { tolti, messo } oppure { respinto, testo }
+        const annotaDiario = (d, ev, tocco, adesso) => {
+            if (!d) d = { mano: 0, parole: 0, carParole: 0, nBlocchi: 0, carBlocchi: 0, blocchi: [], nRespinti: 0, respinti: [], tolti: 0, ms: 0, primo: adesso, ultimo: adesso };
+            d.ms += Math.round(Math.min(30000, Math.max(0, adesso - d.ultimo)));   // millisecondi di scrittura: pause lunghe contate 30 s
+            d.ultimo = adesso;
+            const sec = Math.round((adesso - d.primo) / 1000);
+            const testo = String((ev && (ev.respinto ? ev.testo : ev.messo)) || '');
+            const n = Array.from(testo).length;
+            if (ev && ev.respinto) {
+                d.nRespinti++;
+                // il testo solo se sembra una frase (con spazi): niente password o codici rimasti negli appunti
+                if (d.respinti.length < 20) d.respinti.push([sec, n, /\s/.test(testo.trim()) ? Array.from(testo).slice(0, 80).join('') : '', ev.respinto]);
+                return d;
+            }
+            d.tolti += (ev && ev.tolti) || 0;
+            if (n === 0) return d;
+            if (n === 1 || (n === 2 && !tocco)) { d.mano += n; return d; }
+            if (/\s/.test(testo.trim()) || !tocco) {
+                d.nBlocchi++; d.carBlocchi += n;
+                if (d.blocchi.length < 40) d.blocchi.push([sec, n, testo]);
+            } else { d.parole++; d.carParole += n; }
+            return d;
+        };
+
+        const OpenAnswer = ({ value, onChange, locked, maxLength = 400, onScrittura }) => {
             // Blocco "incolla" indipendente dal dispositivo: se in un solo inserimento
             // entrano troppi caratteri insieme (tipico dell'incolla), lo rifiutiamo.
             // La digitazione normale e i suggerimenti/correzioni della tastiera (poche
             // lettere o una parola alla volta) restano consentiti.
+            // (25/10/2026) Si conta il testo ENTRATO, non quanto e' cresciuta la risposta: prima chi selezionava un pezzo
+            // e ci incollava sopra (con l'incolla della tastiera del telefono) passava, perche' la risposta cresceva poco.
             const SOGLIA_BLOCCO = 25;
+            const annota = (ev) => { try { if (onScrittura) onScrittura(ev); } catch (e) { } };
             const handleChange = (e) => {
                 const next = e.target.value;
                 const prev = value || '';
-                if (next.length - prev.length > SOGLIA_BLOCCO) {
+                const dt = differenzaTesto(prev, next);
+                if (dt.messo.length > SOGLIA_BLOCCO) {
                     // inserimento in blocco: non aggiorno lo stato, il testo non entra
+                    annota({ respinto: 'blocco', testo: dt.messo });
                     return;
                 }
+                annota(dt);
                 onChange(next);
+            };
+            const respingi = (e, come) => {
+                e.preventDefault();
+                let t = '';
+                try { const dati = come === 'incolla' ? e.clipboardData : e.dataTransfer; t = (dati && dati.getData('text')) || ''; } catch (err) { }
+                annota({ respinto: come, testo: t });
             };
             return (
                 <div>
                     <textarea value={value} disabled={locked} maxLength={maxLength}
                         onChange={handleChange}
-                        onPaste={e => e.preventDefault()}
-                        onDrop={e => e.preventDefault()}
+                        onPaste={e => respingi(e, 'incolla')}
+                        onDrop={e => respingi(e, 'trascinato')}
                         onContextMenu={e => e.preventDefault()}
                         autoComplete="off" autoCorrect="off" autoCapitalize="sentences" spellCheck={false}
                         rows={7} placeholder="Scrivi qui la tua risposta argomentata…"
@@ -1136,7 +1189,7 @@
                             {q.type === 'single' && <SingleChoice q={q} answer={ans} onAnswer={answer} order={student.optionOrder?.[q.id]} />}
                             {q.type === 'multi' && <MultiChoice q={q} answer={ans} onToggle={toggleMulti} order={student.optionOrder?.[q.id]} />}
                             {q.type === 'matching' && <Matching q={q} answer={ans} onPick={pickMatch} order={student.matchOrder?.[q.id]} />}
-                            {q.type === 'open' && <OpenAnswer value={ans && typeof ans.selection === 'string' ? ans.selection : ''} onChange={(t) => setOpen(q.id, t)} maxLength={q.maxLength || 400} />}
+                            {q.type === 'open' && <OpenAnswer value={ans && typeof ans.selection === 'string' ? ans.selection : ''} onChange={(t) => setOpen(q.id, t)} maxLength={q.maxLength || 400} onScrittura={(ev) => { if (student.status === 'playing' && azioni.scrittura) azioni.scrittura(q.id, ev); }} />}
                         </div>
 
                         <div className="grid grid-cols-2 gap-3 mt-4">
@@ -3125,6 +3178,7 @@
                     try {
                         if (Object.keys(resto).length) porta('ver_rispondi', { ...chiaviSessione(), p_risposte: resto }, true).catch(() => {});
                         porta('ver_esci', chiaviSessione(), true).catch(() => {});
+                        spedisciScrittura(true);
                     } catch (e) { }
                     salutatoRef.current = true;
                 }
@@ -3225,10 +3279,35 @@
                 spedisciRisposte();
             };
 
+            /* (25/10/2026) TEMPI DI SCRITTURA DELLE APERTE (vedi annotaDiario): un diario per alunno e per ingresso col PIN,
+               spedito intero al massimo ogni 10 secondi, quando la pagina va dietro o si chiude, e con la consegna. */
+            const diarioRef = useRef({ pin: null, sess: null, pezzo: null, disp: null, q: {}, cambiato: false });
+            const diarioTimerRef = useRef(null);
+            const spedisciScrittura = (subito) => {
+                if (diarioTimerRef.current) { clearTimeout(diarioTimerRef.current); diarioTimerRef.current = null; }
+                const se = sessRef.current, d = diarioRef.current;
+                if (!se || !d.cambiato || d.pin !== se.pin || d.sess !== (se.sess || null)) return;
+                d.cambiato = false;
+                try { porta('ver_scrittura', { ...chiaviSessione(), p_pezzo: d.pezzo, p_diari: { disp: d.disp, q: d.q } }, !!subito).catch(() => { d.cambiato = true; }); }
+                catch (e) { d.cambiato = true; }
+            };
+            const scrittura = (qid, ev) => {
+                const se = sessRef.current; if (!se) return;
+                const d = diarioRef.current;
+                if (d.pin !== se.pin || d.sess !== (se.sess || null)) {
+                    diarioRef.current = { pin: se.pin, sess: se.sess || null, pezzo: 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10), disp: schermoATocco() ? 'tocco' : 'computer', q: {}, cambiato: false };
+                }
+                const dd = diarioRef.current;
+                dd.q[qid] = annotaDiario(dd.q[qid], ev, dd.disp === 'tocco', Date.now());
+                dd.cambiato = true;
+                if (!diarioTimerRef.current) diarioTimerRef.current = setTimeout(() => { diarioTimerRef.current = null; spedisciScrittura(false); }, 10000);
+            };
+
             // La consegna porta con se' TUTTE le risposte che ho sullo schermo: cosi' l'ultima lettera non resta per strada.
             const consegna = async () => {
                 const se = sessRef.current, v = vistaRef.current;
                 if (!se || !v) return false;
+                spedisciScrittura(false);
                 const tutte = {};
                 Object.keys(v.student.answers || {}).forEach(k => { const a = v.student.answers[k]; if (a && a.selection !== undefined && a.selection !== null) tutte[k] = a.selection; });
                 try {
@@ -3423,6 +3502,7 @@
                     if (!sessRef.current || salutatoRef.current) return;
                     const resto = { ...inVoloRef.current, ...pendRef.current };
                     try { if (Object.keys(resto).length) porta('ver_rispondi', { ...chiaviSessione(), p_risposte: resto }, true).catch(() => {}); } catch (e) { }
+                    spedisciScrittura(true);
                 };
                 const stato = () => { if (document.visibilityState === 'hidden') salvaResto(); batti(fuoriAdesso(), true); };
                 const via = () => { if (document.visibilityState !== 'hidden' && (suUnCampo() || iPhoneSoloSchermo() || fuocoGuasto())) return; batti(true, true); };
@@ -3434,6 +3514,7 @@
                     try {
                         if (Object.keys(resto).length) porta('ver_rispondi', { ...chiaviSessione(), p_risposte: resto }, true).catch(() => {});
                         porta('ver_esci', chiaviSessione(), true).catch(() => {});
+                        spedisciScrittura(true);                    // per ultimo: non deve rubare spazio alle risposte e al saluto
                     } catch (err) { }
                     salutatoRef.current = true;                     // dopo il saluto il browser manda ancora un «nascosta»: non deve sorpassarlo
                 };
@@ -3541,7 +3622,7 @@
                che non fanno in tempo restano nella copia del dispositivo e ripartono dopo il ricarico, stesso gettone).
                Il ricarico e' un F5: l'alunno torna sulla sua prova. Mai al docente, mai su «Accesso bloccato» o
                «Sessione chiusa». Al massimo una volta ogni 10 minuti. */
-            const VERSIONE_APP = '20261024-06';
+            const VERSIONE_APP = '20261025-01';
             const loadingRef = useRef(true);
             useEffect(() => { loadingRef.current = loading; }, [loading]);
             useEffect(() => {
@@ -3618,7 +3699,7 @@
             }
 
             if (view === 'admin') return <AdminApp db={db} onSyncUpdate={syncUpdateCloud} onResetDB={resetDatabaseCloud} onArchivia={archiviaClasse} onExit={async () => { try { sessionStorage.removeItem(DOCENTE_KEY); } catch (e) { } try { await supabase.auth.signOut({ scope: 'local' }); } catch (e) { } setView('landing'); }} />;
-            if (view === 'student' && vista) return <StudentApp vista={vista} azioni={{ rispondi, consegna, riprova }} />;
+            if (view === 'student' && vista) return <StudentApp vista={vista} azioni={{ rispondi, consegna, riprova, scrittura }} />;
             if (view === 'allenamento' && allen) return <Allenamento pin={allen.pin} nome={allen.nome} onProva={() => new Promise(ok => handleStudentLogin(allen.pin, ok))} onEsci={esciAllenamento} />;
             if (view === 'bloccato' && bussa) return <SchermoBloccato nome={bussa.nome} />;
             if (view === 'chiusa') return <SessioneChiusa onTorna={() => setView('landing')} />;
