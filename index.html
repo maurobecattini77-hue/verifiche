@@ -3116,6 +3116,8 @@
             const pendRef = useRef({});            // risposte da spedire: { idDomanda: selezione }
             const inVoloRef = useRef({});          // risposte spedite, in attesa di conferma
             const inviandoRispRef = useRef(false);
+            const ultimoInvioRispRef = useRef(0);      // (25/10/2026) quando e' partito l'ultimo invio delle risposte
+            const prossimoInvioRispRef = useRef(null); // e l'invio gia' prenotato (vedi spedisciRisposte)
             const rifiutiRef = useRef(0);
             const battitoVoloRef = useRef(0);
             const salutatoRef = useRef(false);     // la pagina ha gia' detto «mi chiudo»: dopo, tace
@@ -3248,6 +3250,16 @@
 
             const spedisciRisposte = async () => {
                 if (inviandoRispRef.current || !sessRef.current || Object.keys(pendRef.current).length === 0) return;
+                // (25/10/2026) AL MASSIMO UN INVIO AL SECONDO, per stare nei limiti dei registri di Supabase (ogni richiesta e'
+                // una riga): prima partiva un invio a ogni tasto. Le risposte sono gia' al sicuro nel dispositivo, e quando la
+                // pagina va dietro, si chiude o si consegna parte subito tutto (salvaResto, chiude, consegna). Un secondo e non
+                // di piu': se il docente consegna mentre l'alunno scrive, fuori resta al massimo l'ultimo secondo di battitura.
+                const attesa = 1000 - (Date.now() - ultimoInvioRispRef.current);
+                if (attesa > 0) {
+                    if (!prossimoInvioRispRef.current) prossimoInvioRispRef.current = setTimeout(() => { prossimoInvioRispRef.current = null; spedisciRisposte(); }, attesa);
+                    return;
+                }
+                ultimoInvioRispRef.current = Date.now();
                 const se = sessRef.current;
                 inviandoRispRef.current = true;
                 inVoloRef.current = pendRef.current; pendRef.current = {};
@@ -3628,7 +3640,7 @@
                che non fanno in tempo restano nella copia del dispositivo e ripartono dopo il ricarico, stesso gettone).
                Il ricarico e' un F5: l'alunno torna sulla sua prova. Mai al docente, mai su «Accesso bloccato» o
                «Sessione chiusa». Al massimo una volta ogni 10 minuti. */
-            const VERSIONE_APP = '20261025-02';
+            const VERSIONE_APP = '20261025-03';
             const loadingRef = useRef(true);
             useEffect(() => { loadingRef.current = loading; }, [loading]);
             useEffect(() => {
