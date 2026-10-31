@@ -2047,7 +2047,7 @@
                                                     const answeredCount = suo.filter(q => isAnswered(q, s)).length;
                                                     const bd = computeBreakdown(s, suo);
                                                     const hasOpen = bd.openMax > 0;
-                                                    const tot = submitted ? bd.total : null;
+                                                    const tot = submitted && !votoSospeso(s, suo) ? bd.total : null;   // (31/10/2026) niente totale, % e voto parziali finché le aperte non sono corrette
                                                     const canView = submitted || (playing && !scollegati[String(s.pin)]);   // «Non collegato»: riga nuda, nessun pulsante
                                                     return (
                                                         <tr key={s.pin} className="border-t border-gray-100 hover:bg-gray-50/60">
@@ -3643,7 +3643,7 @@
                che non fanno in tempo restano nella copia del dispositivo e ripartono dopo il ricarico, stesso gettone).
                Il ricarico e' un F5: l'alunno torna sulla sua prova. Mai al docente, mai su «Accesso bloccato» o
                «Sessione chiusa». Al massimo una volta ogni 10 minuti. */
-            const VERSIONE_APP = '20261025-04';
+            const VERSIONE_APP = '20261031-01';
             const loadingRef = useRef(true);
             useEffect(() => { loadingRef.current = loading; }, [loading]);
             useEffect(() => {
