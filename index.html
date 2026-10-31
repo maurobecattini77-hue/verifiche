@@ -742,6 +742,82 @@
             );
         };
 
+        // (31/10/2026) PULSANTE DI LETTURA per i DSA, come in Cedolino Facile: voce registrata, solo sulle domande con «lettura».
+        // Ogni frase ha il suo audio nel cloud (ver_letture): la pagina le mette in fila nell'ordine che l'alunno vede sullo
+        // schermo, perché domande e risposte sono mescolate per ognuno. Si scarica al primo tocco; il decimo di secondo muto
+        // suonato DENTRO il tocco sblocca la voce sui telefoni. Domande senza «lettura»: qui non si entra mai.
+        const MUTO_MP3 = 'data:audio/mpeg;base64,/+MYxAAAAANIAAAAAExBTUUzLjEwMSAoYmV0YSAzKVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV/+MYxDsAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV/+MYxHYAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV/+MYxLEAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV';
+        const FRASE_SCELTE = 'Le risposte fra cui scegliere sono queste.';
+        const frasiDaLeggere = (q, ordine) => {
+            if (q.type === 'single' || q.type === 'multi') {
+                const opz = q.options || [];
+                const ord = (ordine && ordine.length === opz.length) ? ordine : opz.map((_, i) => i);
+                return [q.question].concat(ord.map(i => opz[i]));
+            }
+            if (q.type === 'matching') {
+                const pairs = q.pairs || [];
+                const items = (ordine && ordine.items && ordine.items.length === pairs.length) ? ordine.items : pairs.map((_, i) => i);
+                const opts = (ordine && ordine.opts && ordine.opts.length === pairs.length) ? ordine.opts : pairs.map((_, i) => i);
+                const dest = Array.isArray(q.opzioni) ? opts.map(i => q.opzioni[i]) : opts.map(i => pairs[i].match);
+                return [q.question].concat(items.map(i => pairs[i].item), [FRASE_SCELTE], dest);
+            }
+            return [q.question];
+        };
+        const voceInMemoria = {};   // gli audio già scaricati, per chiave della domanda
+        const Lettura = ({ q, ordine, chiedi }) => {
+            const [stato, setStato] = useState('fermo');   // fermo, carico, legge, pausa, fine, errore
+            const [pos, setPos] = useState(0);
+            const audioRef = useRef(null), filaRef = useRef([]), posRef = useRef(0), attesaRef = useRef(null), vivoRef = useRef(true);
+            const suona = (n) => {
+                const a = audioRef.current, fila = filaRef.current;
+                clearTimeout(attesaRef.current);
+                if (!a || !vivoRef.current) return;
+                if (n >= fila.length) { posRef.current = 0; setPos(0); setStato('fine'); return; }
+                const m = Math.max(0, n);
+                posRef.current = m; setPos(m); setStato('legge');
+                a.src = 'data:audio/mpeg;base64,' + fila[m];
+                const p = a.play(); if (p && p.catch) p.catch(() => {});
+            };
+            useEffect(() => {
+                vivoRef.current = true;
+                return () => { vivoRef.current = false; clearTimeout(attesaRef.current); const a = audioRef.current; if (a) { a.onended = null; a.onerror = null; try { a.pause(); a.removeAttribute('src'); a.load(); } catch (e) {} } };
+            }, []);
+            const parti = async () => {
+                if (!audioRef.current) {
+                    const a = new Audio();
+                    a.onended = () => { if (a.dataset.muto === '1') return; attesaRef.current = setTimeout(() => suona(posRef.current + 1), 450); };
+                    audioRef.current = a;
+                }
+                const a = audioRef.current;
+                try { a.dataset.muto = '1'; a.src = MUTO_MP3; const p = a.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+                setStato('carico');
+                try {
+                    let voci = voceInMemoria[q.lettura];
+                    if (!voci) { voci = await chiedi(q.lettura); if (Array.isArray(voci) && voci.length) voceInMemoria[q.lettura] = voci; }
+                    if (!vivoRef.current) return;
+                    const mappa = {}; (voci || []).forEach(v => { mappa[v.t] = v.a; });
+                    filaRef.current = frasiDaLeggere(q, ordine).map(t => mappa[t]).filter(Boolean);
+                    if (!filaRef.current.length) { setStato('errore'); return; }
+                    a.dataset.muto = '0';
+                    suona(0);
+                } catch (e) { if (vivoRef.current) setStato('errore'); }
+            };
+            const pausa = () => { clearTimeout(attesaRef.current); const a = audioRef.current; if (a) a.pause(); setStato('pausa'); };
+            const riprendi = () => { const a = audioRef.current; if (!a) return; setStato('legge'); if (a.ended) suona(posRef.current + 1); else { const p = a.play(); if (p && p.catch) p.catch(() => {}); } };
+            const attivo = stato === 'legge' || stato === 'pausa';
+            const scritta = stato === 'carico' ? 'Attendi...' : stato === 'legge' ? 'Pausa' : stato === 'pausa' ? 'Riprendi' : stato === 'fine' ? 'Ascolta di nuovo' : 'Ascolta la domanda';
+            const azione = stato === 'legge' ? pausa : stato === 'pausa' ? riprendi : stato === 'carico' ? (() => {}) : parti;
+            return (
+                <div className="flex flex-wrap items-center gap-2 mb-4 p-2.5 rounded-xl bg-[#5c8b73]/10">
+                    <button type="button" onClick={azione} className="bg-[#5c8b73] text-white rounded-lg px-3.5 py-2 font-bold text-sm hover:brightness-95">{scritta}</button>
+                    {attivo && <button type="button" onClick={() => suona(posRef.current - 1)} title="Frase prima" className="bg-white text-[#3f6a52] border border-[#5c8b73]/40 rounded-lg px-3 py-2 font-bold text-sm flex items-center"><Icon name="prev" size={16}/></button>}
+                    {attivo && <button type="button" onClick={() => suona(posRef.current + 1)} title="Frase dopo" className="bg-white text-[#3f6a52] border border-[#5c8b73]/40 rounded-lg px-3 py-2 font-bold text-sm flex items-center"><Icon name="next" size={16}/></button>}
+                    {attivo && <span className="text-xs font-semibold text-[#3f6a52]">{pos + 1} di {filaRef.current.length}</span>}
+                    {stato === 'errore' && <span className="text-xs font-semibold text-[#b4472f]">Audio non disponibile: riprova o chiama il docente.</span>}
+                </div>
+            );
+        };
+
         // (24/10/2026) GRIGLIA DELLE APERTE da 5 punti, voluta da Mauro sul modello della griglia ministeriale (Allegato A
         // della prova orale) «ma fatta in un modo molto piu' semplice»: Indicatori / Descrittori / Punti / Punteggio, niente
         // giudizi ne' livelli. Fasce sue: conoscenze 0-0,5, 0,5-1, 1-1,5, 1,5-2; le altre 0-0,5 e 0,5-1. I punti sono liberi
@@ -1192,6 +1268,7 @@
                                 <span className="text-xs font-bold text-[#57534a] bg-gray-100 px-2 py-1 rounded">{fmtN(q.points)} pt</span>
                             </div>
                             <p className="font-bold text-[#262420] text-lg mb-5 leading-relaxed">{q.question}</p>
+                            {q.lettura && <Lettura q={q} ordine={q.type === 'matching' ? student.matchOrder?.[q.id] : student.optionOrder?.[q.id]} chiedi={(k) => portaPaziente('ver_lettura', { p_pin: student.pin, p_k: k })} />}
                             {q.type === 'single' && <SingleChoice q={q} answer={ans} onAnswer={answer} order={student.optionOrder?.[q.id]} />}
                             {q.type === 'multi' && <MultiChoice q={q} answer={ans} onToggle={toggleMulti} order={student.optionOrder?.[q.id]} />}
                             {q.type === 'matching' && <Matching q={q} answer={ans} onPick={pickMatch} order={student.matchOrder?.[q.id]} />}
@@ -1248,6 +1325,7 @@
                                     <span className="text-xs font-bold px-2 py-1 rounded bg-gray-100 text-[#57534a] whitespace-nowrap">{fmtN(q.points)} pt</span>
                                 </div>
                                 <p className="font-bold text-[#262420] mb-3 leading-relaxed text-sm">{q.question}</p>
+                                {q.lettura && <Lettura q={q} chiedi={async (k) => { const { data, error } = await supabase.rpc('ver_lettura_doc', { p_k: k }); if (error) throw error; return data; }} />}
                                 {(q.type === 'single' || q.type === 'multi') && (
                                     <div className="space-y-1.5">
                                         {(q.options || []).map((o, k) => {
@@ -3643,7 +3721,7 @@
                che non fanno in tempo restano nella copia del dispositivo e ripartono dopo il ricarico, stesso gettone).
                Il ricarico e' un F5: l'alunno torna sulla sua prova. Mai al docente, mai su «Accesso bloccato» o
                «Sessione chiusa». Al massimo una volta ogni 10 minuti. */
-            const VERSIONE_APP = '20261031-01';
+            const VERSIONE_APP = '20261031-02';
             const loadingRef = useRef(true);
             useEffect(() => { loadingRef.current = loading; }, [loading]);
             useEffect(() => {
