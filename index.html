@@ -764,6 +764,12 @@
             return [q.question];
         };
         const voceInMemoria = {};   // gli audio già scaricati, per chiave della domanda
+        /* (4/11/2026) LETTURA IN CORSO: il fuoco perso non accende il pallino. In 5G Ottoboni, al computer col pulsante di
+           lettura, accendeva il pallino a ogni ritocco del volume: l'icona del volume di Windows sta fuori dalla finestra del
+           browser e cliccarla toglie il fuoco alla pagina. Mentre la voce legge, e per 15 secondi dopo che si ferma, il solo
+           fuoco perso non conta; la pagina nascosta e la finestra rimpicciolita contano sempre. */
+        let letturaFino = 0;
+        const letturaInCorso = () => Date.now() < letturaFino;   // (vale per tutte le domande con la lettura della prova)
         const Lettura = ({ q, ordine, chiedi }) => {
             const [stato, setStato] = useState('fermo');   // fermo, carico, legge, pausa, fine, errore
             const [pos, setPos] = useState(0);
@@ -786,9 +792,12 @@
                 if (!audioRef.current) {
                     const a = new Audio();
                     a.onended = () => { if (a.dataset.muto === '1') return; attesaRef.current = setTimeout(() => suona(posRef.current + 1), 450); };
+                    a.addEventListener('playing', () => { letturaFino = Date.now() + 10 * 60 * 1000; });
+                    ['pause', 'ended', 'error'].forEach(ev => a.addEventListener(ev, () => { letturaFino = Date.now() + 15000; }));
                     audioRef.current = a;
                 }
                 const a = audioRef.current;
+                letturaFino = Date.now() + 15000;
                 try { a.dataset.muto = '1'; a.src = MUTO_MP3; const p = a.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
                 setStato('carico');
                 try {
@@ -3585,7 +3594,18 @@
                     try {
                         studiaSeSiPuo();
                         const b = studiaVerso();
-                        if (!b || !b.guasta) return finestraRistretta();
+                        if (!b) return finestraRistretta();
+                        if (!b.guasta) {
+                            /* (4/11/2026) A DITO, ENTRATO IN ORDINE: L'ALTEZZA CONTA SOTTO IL 70% DELLO SCHERMO. In 5G Merlo (Galaxy S22,
+                               Samsung Internet) aveva il pallino a ogni domanda mentre rispondeva: quando compaiono le barre del browser
+                               in alto e in basso la pagina scende sotto l'85%. Lo schermo diviso sopra/sotto la porta a meta': resta preso,
+                               come la finestra stretta (larghezza sotto il 90%) e la tastiera esclusa come prima. */
+                            if (!finestraRistretta()) return false;
+                            let sw = screen.availWidth || screen.width, sh = screen.availHeight || screen.height;
+                            if ((window.innerWidth > window.innerHeight) !== (sw > sh)) { const t = sw; sw = sh; sh = t; }
+                            const f = misuraFinestra();
+                            return f.w < sw * 0.90 || f.h < sh * 0.70;
+                        }
                         const m = misuraFinestra();
                         if (!m.w || !m.h || !b.m.w || !b.m.h) return false;
                         if (m.w < b.m.w * 0.90) return true;
@@ -3594,7 +3614,7 @@
                         return m.h < b.m.h * 0.70;
                     } catch (e) { return false; }
                 };
-                const fuoriAdesso = () => iPhoneSoloSchermo() ? document.visibilityState === 'hidden' : (document.visibilityState === 'hidden' || (!document.hasFocus() && !suUnCampo() && !fuocoGuasto()) || finestraFuori());
+                const fuoriAdesso = () => iPhoneSoloSchermo() ? document.visibilityState === 'hidden' : (document.visibilityState === 'hidden' || (!document.hasFocus() && !suUnCampo() && !fuocoGuasto() && !letturaInCorso()) || finestraFuori());
                 // Un dispositivo che manda la pagina dietro puo' congelarla o ucciderla senza preavviso: cio' che non e'
                 // ancora confermato parte subito con l'invio che il browser spedisce comunque (keepalive).
                 const salvaResto = () => {
@@ -3604,7 +3624,7 @@
                     spedisciScrittura(true);
                 };
                 const stato = () => { if (document.visibilityState === 'hidden') salvaResto(); batti(fuoriAdesso(), true); };
-                const via = () => { if (document.visibilityState !== 'hidden' && (suUnCampo() || iPhoneSoloSchermo() || fuocoGuasto())) return; batti(true, true); };
+                const via = () => { if (document.visibilityState !== 'hidden' && (suUnCampo() || iPhoneSoloSchermo() || fuocoGuasto() || letturaInCorso())) return; batti(true, true); };
                 const riapre = () => { salutatoRef.current = false; stato(); };
                 const chiude = (e) => {
                     if (e && e.persisted) { via(); return; }        // pagina solo messa da parte: vale come uscita
@@ -3721,7 +3741,7 @@
                che non fanno in tempo restano nella copia del dispositivo e ripartono dopo il ricarico, stesso gettone).
                Il ricarico e' un F5: l'alunno torna sulla sua prova. Mai al docente, mai su «Accesso bloccato» o
                «Sessione chiusa». Al massimo una volta ogni 10 minuti. */
-            const VERSIONE_APP = '20261031-02';
+            const VERSIONE_APP = '20261104-01';
             const loadingRef = useRef(true);
             useEffect(() => { loadingRef.current = loading; }, [loading]);
             useEffect(() => {
